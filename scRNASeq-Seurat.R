@@ -1,17 +1,18 @@
 # Run analysis on single cell RNA data
-# Sample data is from [PandDB](https://hpap.pmacs.upenn.edu/)
-
+# Sample data is from [PancDB](https://hpap.pmacs.upenn.edu/)
 
 ##NB: 
-# currently only Scale data (not sctransform) is included. Add "regression.param <- not0" and sctransform equation to regress variables
+# Note on samples: based on cellrager QC, going to exclude the following (see T2DPancreas-V1.docx)
+excluded.samples <- c("HPAP-027_78239", "HPAP087_FGC2276", "HPAP-090_FGC2390", "HPAP-092_FGC2390", "HPAP-093_FGC2332", "HPAP-093_FGC2390", "HPAP-093_2430", "HPAP-099_FGC2390", "HPAP-100_FGC2390", "HPAP-101_FGC2390")
+  
 
 # Global parameters -------------------------------------------------------
 
-rnaProject <- "Obesity_scRNA-Anchored-NW-OB"
+rnaProject <- "PancT2D_anchored"
 regression.vars <- c("sequencerID", "SampleSex", "SampleAge")
 cum.var.thresh <- 90
 resolution <- 0.5
-comp.type <- "biowulf" # one of macbookPro, biowulf, or workPC
+comp.type <- "biowulf" # one of macbookPro, biowulf
 do.sctransform <- "each" # one of FALSE, each, pooled
 
 ## infrequently modified
@@ -34,8 +35,6 @@ if(comp.type == "macbookPro"){
 	path_to_data <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/scRNA_transfer"
 	sourceable.functions <- list.files(path = "/data/CRGGH/heustonef/hpapdata/RFunctions/", pattern = "*.R", full.names = TRUE)
 	metadata.location <- "/data/CRGGH/heustonef/hpapdata/"
-	# library(vctrs, lib.loc = "/data/heustonef/Rlib_local/")
-	# library(purrr, lib.loc = "/data/heustonef/Rlib_local/")
 }
 
 # Load libraries ----------------------------------------------------------
