@@ -3,9 +3,9 @@
 
 ##NB: 
 # Note on samples: based on cellrager QC, going to exclude the following (see T2DPancreas-V1.docx)
+# Note on sample HPAP-108_FGC2390: files corrupted in PancDB. Excluding until file sizes exceed 512 bytes
+#excluded.samples <- c("HPAP-027_78239", "HPAP087_FGC2276", "HPAP-090_FGC2390", "HPAP-092_FGC2390", "HPAP-093_FGC2332", "HPAP-093_FGC2390", "HPAP-093_2430", "HPAP-099_FGC2390", "HPAP-100_FGC2390", "HPAP-101_FGC2390", "HPAP-108_FGC2390")
 
-#excluded.samples <- c("HPAP-027_78239", "HPAP087_FGC2276", "HPAP-090_FGC2390", "HPAP-092_FGC2390", "HPAP-093_FGC2332", "HPAP-093_FGC2390", "HPAP-093_2430", "HPAP-099_FGC2390", "HPAP-100_FGC2390", "HPAP-101_FGC2390")
-  
 
 # Global parameters -------------------------------------------------------
 
@@ -23,21 +23,21 @@ min.cells <- 3
 min.features <- 200
 doublet.var.thresh <- 90
 predicted.doubletRate <- 0.05
-excluded.samples <- c("HPAP-027_78239", "HPAP087_FGC2276", "HPAP-090_FGC2390", "HPAP-092_FGC2390", "HPAP-093_FGC2332", "HPAP-093_FGC2390", "HPAP-093_2430", "HPAP-099_FGC2390", "HPAP-100_FGC2390", "HPAP-101_FGC2390")
+excluded.samples <- c("HPAP-027_78239", "HPAP087_FGC2276", "HPAP-090_FGC2390", "HPAP-092_FGC2390", "HPAP-093_FGC2332", "HPAP-093_FGC2390", "HPAP-093_2430", "HPAP-099_FGC2390", "HPAP-100_FGC2390", "HPAP-101_FGC2390", "HPAP-108_FGC2390")
 
 
 # Directories -------------------------------------------------------------
 
 if(comp.type == "macbookPro"){
-	rna.dir <- "/Users/heustonef/Desktop/Obesity/scRNA/"
-	path_to_data <- "/Users/heustonef/Desktop/PancDB_data/scRNA_noBams"
-	sourceable.functions <- list.files(path = "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepository/scMultiomics_MetaAnalysis/RFunctions", pattern = "*.R$", full.names = TRUE)
-	metadata.location <- "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepository/scMultiomics_MetaAnalysis/"
+  rna.dir <- "/Users/heustonef/Desktop/Obesity/scRNA/"
+  path_to_data <- "/Users/heustonef/Desktop/PancDB_data/scRNA_noBams"
+  sourceable.functions <- list.files(path = "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepository/scMultiomics_MetaAnalysis/RFunctions", pattern = "*.R$", full.names = TRUE)
+  metadata.location <- "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepository/scMultiomics_MetaAnalysis/"
 } else if(comp.type == "biowulf"){
-	rna.dir <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/"
-	path_to_data <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/scRNA_transfer"
-	sourceable.functions <- list.files(path = "/data/CRGGH/heustonef/hpapdata/RFunctions/", pattern = "*.R", full.names = TRUE)
-	metadata.location <- "/data/CRGGH/heustonef/hpapdata/"
+  rna.dir <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/"
+  path_to_data <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/scRNA_transfer"
+  sourceable.functions <- list.files(path = "/data/CRGGH/heustonef/hpapdata/RFunctions/", pattern = "*.R", full.names = TRUE)
+  metadata.location <- "/data/CRGGH/heustonef/hpapdata/"
 }
 
 # Load libraries ----------------------------------------------------------
@@ -49,7 +49,8 @@ library(cowplot)
 library(foreach)
 library(doParallel)
 library(doMC)
-registerDoMC(cores=future::availableCores()-4)
+registerDoMC(cores = future::availableCores())
+# registerDoMC(cores=8)
 
 ##load local functions
 invisible(sapply(sourceable.functions, source))
@@ -61,42 +62,45 @@ writeLines(capture.output(sessionInfo()), paste0(rnaProject, "_sessionInfo.txt")
 
 ## load data list
 sc.data <- sapply(list.dirs(path = path_to_data, recursive = FALSE, full.names = TRUE), 
-									basename, 
-									USE.NAMES = TRUE)
+                  basename, 
+                  USE.NAMES = TRUE)
 
 metadata <- read.table(file = paste0(metadata.location, "HPAPMetaData.txt"), header = TRUE, sep = "\t", row.names = 1)
 
 # Exclude samples that failed CellRanger QC
 for(i in sc.data){
-	x <- strsplit(i, "_")[[1]][1]
-	if(i %in% excluded.samples){
-		sc.data <- sc.data[sc.data!=i]}
+  x <- strsplit(i, "_")[[1]][1]
+  if(i %in% excluded.samples){
+    sc.data <- sc.data[sc.data!=i]}
 }
 
 # clean up metadata table to exclude data not relevant to patient
 metadata <- metadata[,1:12]
 
 object.list <- c()
+
 foreach(i=1:length(sc.data), .combine="c") %dopar% {
-	object.list[[i]] <- Read10X_h5(paste0(names(sc.data)[i], "/outs/filtered_feature_bc_matrix.h5"))
-	object.list[[i]] <- CreateSeuratObject(object.list[[i]], 
-																				 project = rnaProject, 
-																				 min.cells = min.cells, 
-																				 min.features = min.features)
-	object.list[[i]]$orig.ident <- sc.data[[i]]
-	object.list[[i]] <- AssignMetadata(metadata.df = metadata, seurat.object = object.list[[i]])
-	object.list[[i]] <- PercentageFeatureSet(object.list[[i]], pattern = "MT-", col.name = "percent.mt")
-	
-	object.list[[i]] <- subset(object.list[[i]], 
-														 subset = nFeature_RNA >= 200 &
-														 	nFeature_RNA <= 2500 &
-														 	percent.mt <= 5)
-	
-	print(paste("finished", sc.data[[i]]))
+  # for(i in 1:length(sc.data)){
+  object.list[[i]] <- Read10X_h5(paste0(names(sc.data)[i], "/outs/filtered_feature_bc_matrix.h5"))
+  object.list[[i]] <- CreateSeuratObject(object.list[[i]], 
+                                         project = rnaProject, 
+                                         min.cells = min.cells, 
+                                         min.features = min.features)
+  object.list[[i]]$orig.ident <- sc.data[[i]]
+  object.list[[i]] <- AssignMetadata(metadata.df = metadata, seurat.object = object.list[[i]])
+  object.list[[i]] <- PercentageFeatureSet(object.list[[i]], pattern = "MT-", col.name = "percent.mt")
+  
+  object.list[[i]] <- subset(object.list[[i]], 
+                             subset = nFeature_RNA >= 200 &
+                               nFeature_RNA <= 2500 &
+                               percent.mt <= 5)
+  
+  print(paste("finished", sc.data[[i]]))
 }
-	seurat.object <- merge(object.list[[1]], y = object.list[2:length(object.list)], add.cell.ids = names(object.list))
-	seurat.object$sequencerID <- seurat.object$orig.ident
-	seurat.object$sequencerID <- with(seurat.object, stringi::stri_replace_all_fixed(seurat.object$sequencerID, seurat.object$DonorID, ""))
+seurat.object <- merge(object.list[[1]], y = object.list[2:length(object.list)], add.cell.ids = names(object.list))
+seurat.object$sequencerID <- seurat.object$orig.ident
+seurat.object$sequencerID <- with(seurat.object, stringi::stri_replace_all_fixed(seurat.object$sequencerID, seurat.object$DonorID, ""))
+saveRDS(seurat.object, file = paste0(rnaProject, "-rawMergedSeurat.Object.RDS"))
 
 # QC ----------------------------------------------------------------------
 
@@ -111,56 +115,56 @@ plot1 + plot2
 
 
 if(do.sctransform == FALSE){ # standard method
-	print("Performing standard normalization and scaling")
-	if(length(regression.vars) >1){
-		print("HEY YOU! You're performing standard scaling on more than 1 regression variable. You should probably be doing SCTransform. Set `do.sctransform` to TRUE")
-	}
-	
-	##normalize
-	seurat.object <- NormalizeData(seurat.object, normalization.method = "LogNormalize", scale.factor = 10000)
-	
-	##find HVG
-	seurat.object <- FindVariableFeatures(seurat.object, selection.method = "vst", nfeatures = 2000)
-	top10hvg <- head(VariableFeatures(seurat.object), 10)
-	plot1 <- VariableFeaturePlot(seurat.object)
-	plot2	<- LabelPoints(plot = plot1, points = top10hvg, repel = TRUE)
-	plot1 + plot2
-	top10hvg
-	
-	##scale (a linear transformation)
-	all.genes <- rownames(seurat.object)
-	
-	seurat.object <- ScaleData(seurat.object, features = all.genes, vars.to.regress = regression.vars)
-	
+  print("Performing standard normalization and scaling")
+  if(length(regression.vars) >1){
+    print("HEY YOU! You're performing standard scaling on more than 1 regression variable. You should probably be doing SCTransform. Set `do.sctransform` to TRUE")
+  }
+  
+  ##normalize
+  seurat.object <- NormalizeData(seurat.object, normalization.method = "LogNormalize", scale.factor = 10000)
+  
+  ##find HVG
+  seurat.object <- FindVariableFeatures(seurat.object, selection.method = "vst", nfeatures = 2000)
+  top10hvg <- head(VariableFeatures(seurat.object), 10)
+  plot1 <- VariableFeaturePlot(seurat.object)
+  plot2	<- LabelPoints(plot = plot1, points = top10hvg, repel = TRUE)
+  plot1 + plot2
+  top10hvg
+  
+  ##scale (a linear transformation)
+  all.genes <- rownames(seurat.object)
+  
+  seurat.object <- ScaleData(seurat.object, features = all.genes, vars.to.regress = regression.vars)
+  
 } else if(do.sctransform == "each"){
-	print("Performing SCTransform")
-	object.list <- SplitObject(seurat.object, split.by = "orig.ident")
-	
-	foreach(i=1:length(object.list, .combine="c")) %dopar% {
-	  object.list <- lapply(X = object.list, 
-	                        FUN = SCTransform, assay = "RNA", return.only.var.genes = FALSE, vst.flavor = "v2")
-	  
-	  # RUN DOUBLETFINDER AFTER UMAPhttps://github.com/kpatel427/YouTubeTutorials/blob/main/singleCell_doublets.R
-	  object.list <- lapply(X = object.list, 
-	                        FUN = runDoubletFinder, sctransformed = TRUE, tot.var = doublet.var.thresh, predicted.doubletRate = predicted.doubletRate)
-	  # object.list <- lapply(X = object.list,
-	  # FUN = CellCycleScoring, s.features = Seurat::cc.genes$s.genes, g2m.features = Seurat::cc.genes$g2m.genes)
-	  object.list <- lapply(X = object.list,
-	                        FUN = subset, subset = DF.classifications == "Singlet")
-	}
-	integration.features <- SelectIntegrationFeatures(object.list = object.list, verbose = TRUE, nfeatures = 3000)
-	object.list <- PrepSCTIntegration(object.list = object.list, anchor.features = integration.features, verbose = TRUE)
-	integration.anchors <- FindIntegrationAnchors(object.list = object.list, anchor.features = integration.features, normalization.method = "SCT", verbose = TRUE)
-	seurat.object <- IntegrateData(anchorset = integration.anchors, verbose = TRUE, preserve.order = FALSE, normalization.method = "SCT")
-	
+  print("Performing SCTransform")
+  object.list <- SplitObject(seurat.object, split.by = "orig.ident")
+  
+  foreach(i=1:length(object.list, .combine="c")) %dopar% {
+    object.list <- lapply(X = object.list, 
+                          FUN = SCTransform, assay = "RNA", return.only.var.genes = FALSE, vst.flavor = "v2")
+    
+    # RUN DOUBLETFINDER AFTER UMAPhttps://github.com/kpatel427/YouTubeTutorials/blob/main/singleCell_doublets.R
+    object.list <- lapply(X = object.list, 
+                          FUN = runDoubletFinder, sctransformed = TRUE, tot.var = doublet.var.thresh, predicted.doubletRate = predicted.doubletRate)
+    # object.list <- lapply(X = object.list,
+    # FUN = CellCycleScoring, s.features = Seurat::cc.genes$s.genes, g2m.features = Seurat::cc.genes$g2m.genes)
+    object.list <- lapply(X = object.list,
+                          FUN = subset, subset = DF.classifications == "Singlet")
+  }
+  integration.features <- SelectIntegrationFeatures(object.list = object.list, verbose = TRUE, nfeatures = 3000)
+  object.list <- PrepSCTIntegration(object.list = object.list, anchor.features = integration.features, verbose = TRUE)
+  integration.anchors <- FindIntegrationAnchors(object.list = object.list, anchor.features = integration.features, normalization.method = "SCT", verbose = TRUE)
+  seurat.object <- IntegrateData(anchorset = integration.anchors, verbose = TRUE, preserve.order = FALSE, normalization.method = "SCT")
+  
 } else if(do.sctransform == "pooled") {
-	seurat.object <- SCTransform(seurat.object, method = "glsGamPoi", vars.to.regress = regression.vars, verbose = TRUE, return.only.var.genes = FALSE, vst.flavor = "v2")
-	seurat.object <- runDoubletFinder(seurat.object = seurat.object, sctransformed = TRUE, tot.var = doublet.var.thresh, predicted.doubletRate = predicted.doubletRate)
-	seurat.object <- CellCycleScoring(seurat.object, s.features = Seurat::cc.genes$s.genes, g2m.features = Seurat::cc.genes$g2m.genes)
-	seurat.object <- subset(seurat.object, subset = DF.classifications == "Singlet")
-	
+  seurat.object <- SCTransform(seurat.object, method = "glsGamPoi", vars.to.regress = regression.vars, verbose = TRUE, return.only.var.genes = FALSE, vst.flavor = "v2")
+  seurat.object <- runDoubletFinder(seurat.object = seurat.object, sctransformed = TRUE, tot.var = doublet.var.thresh, predicted.doubletRate = predicted.doubletRate)
+  seurat.object <- CellCycleScoring(seurat.object, s.features = Seurat::cc.genes$s.genes, g2m.features = Seurat::cc.genes$g2m.genes)
+  seurat.object <- subset(seurat.object, subset = DF.classifications == "Singlet")
+  
 }else {
-	print("Must set do.sctransform to one of: FALSE, each, pooled")
+  print("Must set do.sctransform to one of: FALSE, each, pooled")
 }
 
 saveRDS(seurat.object, file = paste0(rna.dir, "/", rnaProject, ".RDS"))
@@ -179,9 +183,9 @@ saveRDS(seurat.object, file = paste0(rna.dir, "/", rnaProject, ".RDS"))
 # Determine dimensionality ------------------------------------------------
 
 if(run.jackstraw == TRUE){
-	seurat.object <- JackStraw(seurat.object, num.replicate = 100)
-	seurat.object <- ScoreJackStraw(seurat.object, dims = 1:40)
-	JackStrawPlot(seurat.object, dims = 1:40)
+  seurat.object <- JackStraw(seurat.object, num.replicate = 100)
+  seurat.object <- ScoreJackStraw(seurat.object, dims = 1:40)
+  JackStrawPlot(seurat.object, dims = 1:40)
 }
 
 ElbowPlot(seurat.object)
@@ -195,7 +199,7 @@ paste0("Num pcs for 95% variance: ", length(which(cumsum(tot.var) <= 95)))
 
 cluster.dims <- 0
 if(cum.var.thresh > 0){
-	cluster.dims <- length(which(cumsum(tot.var) <= cum.var.thresh))
+  cluster.dims <- length(which(cumsum(tot.var) <= cum.var.thresh))
 }
 
 saveRDS(seurat.object, file = paste0(rna.dir, "/", rnaProject, ".RDS"))
@@ -228,14 +232,14 @@ seurat.object <- PrepSCTFindMarkers(seurat.object, assay = "SCT")
 
 markers.seurat.pos <- FindAllMarkers(seurat.object, assay = "SCT", only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
 markers.seurat.pos <- markers.seurat.pos %>% 
-	group_by(cluster) %>%
-	arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
+  group_by(cluster) %>%
+  arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
 saveRDS(markers.seurat.pos, file = paste0(rnaProject, "-posmarkers-90pctvar.rds"))
 
 markers.seurat.all <- FindAllMarkers(seurat.object, assay = "SCT", only.pos = FALSE, min.pct = 0.25, logfc.threshold = 0.25)
 markers.seurat.all %>%
-	group_by(cluster) %>%
-	arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
+  group_by(cluster) %>%
+  arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
 saveRDS(markers.seurat.all, file = paste0(rnaProject, "-allmarkers-90pctvar.rds"))
 
 ##create workbook
@@ -257,7 +261,7 @@ openxlsx::saveWorkbook(wb = markers.table, file = paste0(rnaProject, "_seuratMar
 # Cell Cycle Scoring ------------------------------------------------------
 
 if(!do.sctransform == FALSE){
-	DefaultAssay(seurat.object) <- "SCT"
+  DefaultAssay(seurat.object) <- "SCT"
 }
 seurat.object <- CellCycleScoring(seurat.object, s.features = Seurat::cc.genes$s.genes, g2m.features = Seurat::cc.genes$g2m.genes)
 
@@ -335,16 +339,16 @@ cds <- learn_graph(cds, use_partition = F)
 # From monocle3 tutorial
 # a helper function to identify the root principal points:
 get_earliest_principal_node <- function(cds){
-	cell_ids <- which(colData(cds)[, "SCT_snn_res.0.5"] %in% c(6, 7))
-
-	closest_vertex <-
-		cds@principal_graph_aux[["UMAP"]]$pr_graph_cell_proj_closest_vertex
-	closest_vertex <- as.matrix(closest_vertex[colnames(cds), ])
-	root_pr_nodes <-
-		igraph::V(principal_graph(cds)[["UMAP"]])$name[as.numeric(names
-																															(which.max(table(closest_vertex[cell_ids,]))))]
-
-	root_pr_nodes
+  cell_ids <- which(colData(cds)[, "SCT_snn_res.0.5"] %in% c(6, 7))
+  
+  closest_vertex <-
+    cds@principal_graph_aux[["UMAP"]]$pr_graph_cell_proj_closest_vertex
+  closest_vertex <- as.matrix(closest_vertex[colnames(cds), ])
+  root_pr_nodes <-
+    igraph::V(principal_graph(cds)[["UMAP"]])$name[as.numeric(names
+                                                              (which.max(table(closest_vertex[cell_ids,]))))]
+  
+  root_pr_nodes
 }
 cds <- order_cells(cds, root_pr_nodes=get_earliest_principal_node(cds))
 saveRDS(cds, file = paste0(rnaProject, "-monocle3CDS-90pctvar.RDS"))
