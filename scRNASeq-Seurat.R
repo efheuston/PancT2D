@@ -3,7 +3,8 @@
 
 ##NB: 
 # Note on samples: based on cellrager QC, going to exclude the following (see T2DPancreas-V1.docx)
-excluded.samples <- c("HPAP-027_78239", "HPAP087_FGC2276", "HPAP-090_FGC2390", "HPAP-092_FGC2390", "HPAP-093_FGC2332", "HPAP-093_FGC2390", "HPAP-093_2430", "HPAP-099_FGC2390", "HPAP-100_FGC2390", "HPAP-101_FGC2390")
+
+#excluded.samples <- c("HPAP-027_78239", "HPAP087_FGC2276", "HPAP-090_FGC2390", "HPAP-092_FGC2390", "HPAP-093_FGC2332", "HPAP-093_FGC2390", "HPAP-093_2430", "HPAP-099_FGC2390", "HPAP-100_FGC2390", "HPAP-101_FGC2390")
   
 
 # Global parameters -------------------------------------------------------
@@ -22,6 +23,8 @@ min.cells <- 3
 min.features <- 200
 doublet.var.thresh <- 90
 predicted.doubletRate <- 0.05
+excluded.samples <- c("HPAP-027_78239", "HPAP087_FGC2276", "HPAP-090_FGC2390", "HPAP-092_FGC2390", "HPAP-093_FGC2332", "HPAP-093_FGC2390", "HPAP-093_2430", "HPAP-099_FGC2390", "HPAP-100_FGC2390", "HPAP-101_FGC2390")
+
 
 # Directories -------------------------------------------------------------
 
@@ -43,6 +46,10 @@ library(dplyr)
 library(Seurat)
 library(patchwork)
 library(cowplot)
+library(foreach)
+library(doParallel)
+library(doMC)
+registerDoMC(cores=future::availableCores()-4)
 
 ##load local functions
 invisible(sapply(sourceable.functions, source))
@@ -52,35 +59,25 @@ invisible(sapply(sourceable.functions, source))
 try(setwd(rna.dir), silent = TRUE)
 writeLines(capture.output(sessionInfo()), paste0(rnaProject, "_sessionInfo.txt"))
 
-
-
-
-##load seurat object
-
+## load data list
 sc.data <- sapply(list.dirs(path = path_to_data, recursive = FALSE, full.names = TRUE), 
 									basename, 
 									USE.NAMES = TRUE)
 
-#remember to drop HPAP-093 b/c it clusters separately
-for(i in sc.data){
-	if(grepl("HPAP-093", i, ignore.case = TRUE)){
-		sc.data <- sc.data[sc.data!=i]
-	}
-}
+metadata <- read.table(file = paste0(metadata.location, "HPAPMetaData.txt"), header = TRUE, sep = "\t", row.names = 1)
 
-metadata <- read.table(file = paste0(metadata.location, "HPAPMetaData.txt"), header = TRUE, sep = "\t")
-rownames(metadata) <- metadata$DonorID
-
-# Exclude OW donors
+# Exclude samples that failed CellRanger QC
 for(i in sc.data){
 	x <- strsplit(i, "_")[[1]][1]
-	if(!(metadata[x, "SimpDisease"] == "NoDM" & (metadata[x, "BMI"] < 25 | metadata[x, "BMI"] > 30) & metadata[x, "scRNA"] > 0)){
+	if(i %in% excluded.samples){
 		sc.data <- sc.data[sc.data!=i]}
 }
 
+# clean up metadata table to exclude data not relevant to patient
+metadata <- metadata[,1:12]
 
 object.list <- c()
-for(i in 1:length(sc.data)){
+foreach(i=1:length(sc.data), .combine="c") %dopar% {
 	object.list[[i]] <- Read10X_h5(paste0(names(sc.data)[i], "/outs/filtered_feature_bc_matrix.h5"))
 	object.list[[i]] <- CreateSeuratObject(object.list[[i]], 
 																				 project = rnaProject, 
@@ -97,13 +94,10 @@ for(i in 1:length(sc.data)){
 	
 	print(paste("finished", sc.data[[i]]))
 }
-
-
 	seurat.object <- merge(object.list[[1]], y = object.list[2:length(object.list)], add.cell.ids = names(object.list))
-
-	
 	seurat.object$sequencerID <- seurat.object$orig.ident
 	seurat.object$sequencerID <- with(seurat.object, stringi::stri_replace_all_fixed(seurat.object$sequencerID, seurat.object$DonorID, ""))
+
 # QC ----------------------------------------------------------------------
 
 ##plot qc stats
@@ -141,18 +135,19 @@ if(do.sctransform == FALSE){ # standard method
 } else if(do.sctransform == "each"){
 	print("Performing SCTransform")
 	object.list <- SplitObject(seurat.object, split.by = "orig.ident")
-	object.list <- lapply(X = object.list, 
-												FUN = SCTransform, assay = "RNA", return.only.var.genes = FALSE, vst.flavor = "v2")
-
-	# RUN DOUBLETFINDER AFTER UMAPhttps://github.com/kpatel427/YouTubeTutorials/blob/main/singleCell_doublets.R
-	object.list <- lapply(X = object.list, 
-												FUN = runDoubletFinder, sctransformed = TRUE, tot.var = doublet.var.thresh, predicted.doubletRate = predicted.doubletRate)
-	# object.list <- lapply(X = object.list,
-												# FUN = CellCycleScoring, s.features = Seurat::cc.genes$s.genes, g2m.features = Seurat::cc.genes$g2m.genes)
-	object.list <- lapply(X = object.list,
-												FUN = subset, subset = DF.classifications == "Singlet")
 	
-
+	foreach(i=1:length(object.list, .combine="c")) %dopar% {
+	  object.list <- lapply(X = object.list, 
+	                        FUN = SCTransform, assay = "RNA", return.only.var.genes = FALSE, vst.flavor = "v2")
+	  
+	  # RUN DOUBLETFINDER AFTER UMAPhttps://github.com/kpatel427/YouTubeTutorials/blob/main/singleCell_doublets.R
+	  object.list <- lapply(X = object.list, 
+	                        FUN = runDoubletFinder, sctransformed = TRUE, tot.var = doublet.var.thresh, predicted.doubletRate = predicted.doubletRate)
+	  # object.list <- lapply(X = object.list,
+	  # FUN = CellCycleScoring, s.features = Seurat::cc.genes$s.genes, g2m.features = Seurat::cc.genes$g2m.genes)
+	  object.list <- lapply(X = object.list,
+	                        FUN = subset, subset = DF.classifications == "Singlet")
+	}
 	integration.features <- SelectIntegrationFeatures(object.list = object.list, verbose = TRUE, nfeatures = 3000)
 	object.list <- PrepSCTIntegration(object.list = object.list, anchor.features = integration.features, verbose = TRUE)
 	integration.anchors <- FindIntegrationAnchors(object.list = object.list, anchor.features = integration.features, normalization.method = "SCT", verbose = TRUE)
