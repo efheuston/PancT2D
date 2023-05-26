@@ -6,6 +6,8 @@
 # Note on sample HPAP-108_FGC2390: files corrupted in PancDB. Excluding until file sizes exceed 512 bytes
 #excluded.samples <- c("HPAP-027_78239", "HPAP087_FGC2276", "HPAP-090_FGC2390", "HPAP-092_FGC2390", "HPAP-093_FGC2332", "HPAP-093_FGC2390", "HPAP-093_2430", "HPAP-099_FGC2390", "HPAP-100_FGC2390", "HPAP-101_FGC2390", "HPAP-108_FGC2390")
 
+# 2023.05.25 - subset samples to compare AA vs EU
+
 
 # Global parameters -------------------------------------------------------
 
@@ -13,7 +15,7 @@ rnaProject <- "PancT2D_anchored"
 regression.vars <- c("sequencerID", "SampleSex", "SampleAge")
 cum.var.thresh <- 90
 resolution <- 0.5
-comp.type <- "biowulf" # one of macbookPro, biowulf
+comp.type <- "macbookPro" # one of macbookPro, biowulf
 do.sctransform <- "each" # one of FALSE, each, pooled
 
 ## infrequently modified
@@ -32,7 +34,7 @@ if(comp.type == "macbookPro"){
   rna.dir <- "/Users/heustonef/Desktop/Obesity/scRNA/"
   path_to_data <- "/Users/heustonef/Desktop/PancDB_data/scRNA_noBams"
   sourceable.functions <- list.files(path = "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepository/scMultiomics_MetaAnalysis/RFunctions", pattern = "*.R$", full.names = TRUE)
-  metadata.location <- "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepository/scMultiomics_MetaAnalysis/"
+  metadata.location <- "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/"
 } else if(comp.type == "biowulf"){
   rna.dir <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/"
   path_to_data <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/scRNA_transfer"
