@@ -6,16 +6,14 @@
 # Note on sample HPAP-108_FGC2390: files corrupted in PancDB. Excluding until file sizes exceed 512 bytes
 #excluded.samples <- c("HPAP-027_78239", "HPAP087_FGC2276", "HPAP-090_FGC2390", "HPAP-092_FGC2390", "HPAP-093_FGC2332", "HPAP-093_FGC2390", "HPAP-093_2430", "HPAP-099_FGC2390", "HPAP-100_FGC2390", "HPAP-101_FGC2390", "HPAP-108_FGC2390")
 
-# 2023.05.25 - subset samples to compare AA vs EU
-
 
 # Global parameters -------------------------------------------------------
 
-rnaProject <- "PancT2D_anchored"
+rnaProject <- "PancT2D_AAvsEUonly"
 regression.vars <- c("sequencerID", "SampleSex", "SampleAge")
 cum.var.thresh <- 90
 resolution <- 0.5
-comp.type <- "macbookPro" # one of macbookPro, biowulf
+comp.type <- "biowulf" # one of macbookPro, biowulf
 do.sctransform <- "each" # one of FALSE, each, pooled
 
 ## infrequently modified
@@ -34,7 +32,7 @@ if(comp.type == "macbookPro"){
   rna.dir <- "/Users/heustonef/Desktop/Obesity/scRNA/"
   path_to_data <- "/Users/heustonef/Desktop/PancDB_data/scRNA_noBams"
   sourceable.functions <- list.files(path = "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepository/scMultiomics_MetaAnalysis/RFunctions", pattern = "*.R$", full.names = TRUE)
-  metadata.location <- "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/"
+  metadata.location <- "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepository/scMultiomics_MetaAnalysis/"
 } else if(comp.type == "biowulf"){
   rna.dir <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/"
   path_to_data <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/scRNA_transfer"
@@ -66,7 +64,7 @@ writeLines(capture.output(sessionInfo()), paste0(rnaProject, "_sessionInfo.txt")
 sc.data <- sapply(list.dirs(path = path_to_data, recursive = FALSE, full.names = TRUE), 
                   basename, 
                   USE.NAMES = TRUE)
-
+sc.data <- sc.data[grepl(pattern = "^HPAP", sc.data)]
 metadata <- read.table(file = paste0(metadata.location, "HPAPMetaData.txt"), header = TRUE, sep = "\t", row.names = 1)
 
 # Exclude samples that failed CellRanger QC
@@ -81,8 +79,8 @@ metadata <- metadata[,1:12]
 
 object.list <- c()
 
-foreach(i=1:length(sc.data), .combine="c") %dopar% {
-  # for(i in 1:length(sc.data)){
+# foreach(i=1:length(sc.data), .combine="c") %dopar% {
+for(i in 1:length(sc.data)){
   object.list[[i]] <- Read10X_h5(paste0(names(sc.data)[i], "/outs/filtered_feature_bc_matrix.h5"))
   object.list[[i]] <- CreateSeuratObject(object.list[[i]], 
                                          project = rnaProject, 
@@ -100,14 +98,15 @@ foreach(i=1:length(sc.data), .combine="c") %dopar% {
   print(paste("finished", sc.data[[i]]))
 }
 seurat.object <- merge(object.list[[1]], y = object.list[2:length(object.list)], add.cell.ids = names(object.list))
+seurat.object$DonorID <- sapply(seurat.object$orig.ident, sub, pattern = "_.*", replacement = "")
 seurat.object$sequencerID <- seurat.object$orig.ident
-seurat.object$sequencerID <- with(seurat.object, stringi::stri_replace_all_fixed(seurat.object$sequencerID, seurat.object$DonorID, ""))
+seurat.object$sequencerID <- sapply(seurat.object$orig.ident, sub, pattern = ".*_", replacement = "")
 saveRDS(seurat.object, file = paste0(rnaProject, "-rawMergedSeurat.Object.RDS"))
 
 # QC ----------------------------------------------------------------------
 
 ##plot qc stats
-VlnPlot(seurat.object, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+VlnPlot(seurat.object, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0)
 plot1<- FeatureScatter(seurat.object, feature1 = "nCount_RNA", feature2 = "percent.mt")
 plot2 <- FeatureScatter(seurat.object, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
 plot1 + plot2
@@ -142,7 +141,8 @@ if(do.sctransform == FALSE){ # standard method
   print("Performing SCTransform")
   object.list <- SplitObject(seurat.object, split.by = "orig.ident")
   
-  foreach(i=1:length(object.list, .combine="c")) %dopar% {
+  # foreach(i=1:length(object.list), .combine="c") %dopar% {
+  for(i in 1:length(object.list)){
     object.list <- lapply(X = object.list, 
                           FUN = SCTransform, assay = "RNA", return.only.var.genes = FALSE, vst.flavor = "v2")
     
@@ -158,6 +158,7 @@ if(do.sctransform == FALSE){ # standard method
   object.list <- PrepSCTIntegration(object.list = object.list, anchor.features = integration.features, verbose = TRUE)
   integration.anchors <- FindIntegrationAnchors(object.list = object.list, anchor.features = integration.features, normalization.method = "SCT", verbose = TRUE)
   seurat.object <- IntegrateData(anchorset = integration.anchors, verbose = TRUE, preserve.order = FALSE, normalization.method = "SCT")
+  print(paste("made progress on", as.character(i)))
   
 } else if(do.sctransform == "pooled") {
   seurat.object <- SCTransform(seurat.object, method = "glsGamPoi", vars.to.regress = regression.vars, verbose = TRUE, return.only.var.genes = FALSE, vst.flavor = "v2")
@@ -168,8 +169,10 @@ if(do.sctransform == FALSE){ # standard method
 }else {
   print("Must set do.sctransform to one of: FALSE, each, pooled")
 }
-
 saveRDS(seurat.object, file = paste0(rna.dir, "/", rnaProject, ".RDS"))
+
+
+
 # Linear dimensional reduction --------------------------------------------
 
 
