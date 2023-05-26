@@ -1,0 +1,81 @@
+---
+title: "PancT2D_AAvsEu"
+output: html_document
+date: "2023-05-25"
+---
+
+PancDB has NoDM and T2D for (AA = 4 & 6) and (EU = Many). Goal is to compare AA and EU for unique profiles. Must identify best set of EU (ideal 8 + 12) that has similar profile to AA data.
+
+Considerations:
+  - Age
+  - BMI
+  - Sex
+  
+# Load libraries
+```{r}
+library(ggplot2)
+library(dplyr)
+```
+
+# Load metadata
+```{r}
+metadata <- read.table(file = "~/OneDrive-NIH/SingleCellMetaAnalysis/HPAPMetaData.txt", header = TRUE, sep = "\t", row.names = 1)
+head(metadata)
+```
+Limit to relevant datasets
+
+```{r}
+metadata.rna <- metadata[metadata$scRNA >0,] # require scRNA
+metadata.rna <- metadata.rna[!(metadata.rna$SimpDisease == "T1DM"),] # exclude T1DM groups
+metadata.rna <- metadata.rna[grepl("Af|Cauc|Black", x = metadata.rna$SampleEthnicity, ignore.case = TRUE),] # keep only Af or EU ancestry
+metadata.rna
+
+```
+
+# Look at AA dataset
+```{r}
+aa.metadata <- metadata.rna %>% 
+  filter(case_when(grepl("African", SampleEthnicity) ~ TRUE))
+dim(aa.metadata)
+```
+```{r}
+ggplot(aa.metadata, aes(SampleSex, SimpDisease)) + 
+  geom_count()
+```
+```{r}
+ggplot(aa.metadata, aes(BMI)) + 
+ geom_histogram(aes(y=after_stat(density)), colour="black", fill="white", bins = 30)+
+  geom_density(alpha=.2, fill="#FF6666")
+```
+
+
+# Look at EU dataset
+```{r}
+eu.metadata <- metadata %>% 
+  filter(case_when(grepl("Cauc", SampleEthnicity) ~ TRUE))
+dim(eu.metadata)
+```
+```{r}
+ggplot(eu.metadata, aes(SampleSex, SimpDisease)) + 
+  geom_count()
+```
+
+# scATAC
+```{r}
+metadata.atac <- metadata[metadata$scATAC >0,] # require scATAC
+metadata.atac <- metadata.atac[!(metadata.atac$SimpDisease == "T1DM"),] # exclude T1DM groups
+metadata.atac <- metadata.atac[grepl("Af|Cauc|Black", x = metadata.atac$SampleEthnicity, ignore.case = TRUE),] # keep only Af or EU ancestry
+metadata.atac$DonorID <- rownames(metadata.atac)
+metadata.atac[metadata.atac$SampleEthnicity == "Caucasian ", "SampleEthnicity"] <- "Caucasian" #because no matter what I do I can't get rid of that stupid space
+metadata.atac
+```
+```{r}
+plotme <- metadata.atac %>%
+  group_by(SimpDisease, SampleEthnicity) %>%
+  summarise(DonorCount = n()) 
+  ggplot(plotme, aes(x = SimpDisease, y = SampleEthnicity, fill = SampleEthnicity)) + 
+  geom_bar(aes(y = DonorCount), position = "dodge", stat = "identity") + 
+    scale_y_continuous(breaks = seq(0, 20, 2),
+                       limits = c(0, 20))
+```
+
