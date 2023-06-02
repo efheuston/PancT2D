@@ -115,6 +115,7 @@ object.list <- foreach(i=1:length(sc.data), .combine="c", .packages = 'Seurat') 
     return(object.item)
   }
 }
+stopCluster(cl)
 
 seurat.object <- merge(object.list[[1]], y = object.list[2:length(object.list)], add.cell.ids = names(object.list))
 seurat.object$DonorID <- sapply(seurat.object$orig.ident, sub, pattern = "_.*", replacement = "")
@@ -122,17 +123,22 @@ seurat.object$sequencerID <- seurat.object$orig.ident
 seurat.object$sequencerID <- sapply(seurat.object$orig.ident, sub, pattern = ".*_", replacement = "")
 saveRDS(seurat.object, file = paste0(rnaProject, "-rawMergedSeurat.Object.RDS"))
 
+remove(object.list)
+
+
 # QC ----------------------------------------------------------------------
 
 ##plot qc stats
-VlnPlot(seurat.object, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0)
-plot1<- FeatureScatter(seurat.object, feature1 = "nCount_RNA", feature2 = "percent.mt")
-plot2 <- FeatureScatter(seurat.object, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
-plot1 + plot2
+#VlnPlot(seurat.object, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0)
+#plot1<- FeatureScatter(seurat.object, feature1 = "nCount_RNA", feature2 = "percent.mt")
+#plot2 <- FeatureScatter(seurat.object, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+#plot1 + plot2
 
 
 # Normalize and scale data ----------------------------------------------------------
 
+cl <- makeCluster(future::availableCores(), outfile = "")
+registerDoParallel(cl)
 
 if(do.sctransform == FALSE){ # standard method
   print("Performing standard normalization and scaling")
@@ -176,7 +182,10 @@ if(do.sctransform == FALSE){ # standard method
   
   integration.features <- SelectIntegrationFeatures(object.list = object.list, verbose = TRUE, nfeatures = 3000)
   object.list <- PrepSCTIntegration(object.list = object.list, anchor.features = integration.features, verbose = TRUE)
+  save.image(file = paste0(rna.dir, "/", rnaProject, ".RData"))
   integration.anchors <- FindIntegrationAnchors(object.list = object.list, anchor.features = integration.features, normalization.method = "SCT", verbose = TRUE)
+  print("Starting IntegrateData function")
+  save.image(file = paste0(rna.dir, "/", rnaProject, ".RData"))
   seurat.object <- IntegrateData(anchorset = integration.anchors, verbose = TRUE, preserve.order = FALSE, normalization.method = "SCT")
   print(paste("made progress on", as.character(i)))
   
@@ -189,6 +198,8 @@ if(do.sctransform == FALSE){ # standard method
 }else {
   print("Must set do.sctransform to one of: FALSE, each, pooled")
 }
+stopCluster(cl)
+remove(object.list)
 saveRDS(seurat.object, file = paste0(rna.dir, "/", rnaProject, ".RDS"))
 
 
