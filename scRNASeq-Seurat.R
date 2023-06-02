@@ -1,3 +1,5 @@
+# Run notes -------------------------------------------------------------
+
 # Run analysis on single cell RNA data
 # Sample data is from [PancDB](https://hpap.pmacs.upenn.edu/)
 
@@ -5,11 +7,11 @@
 # Note on samples: based on cellrager QC, going to exclude the following (see T2DPancreas-V1.docx)
 # Note on sample HPAP-108_FGC2390: files corrupted in PancDB. Excluding until file sizes exceed 512 bytes
 #excluded.samples <- c("HPAP-027_78239", "HPAP087_FGC2276", "HPAP-090_FGC2390", "HPAP-092_FGC2390", "HPAP-093_FGC2332", "HPAP-093_FGC2390", "HPAP-093_2430", "HPAP-099_FGC2390", "HPAP-100_FGC2390", "HPAP-101_FGC2390", "HPAP-108_FGC2390")
-
+# 2023.05.26 - due to limited sample number, comparing AA and EU in T2D cases ONLY
 
 # Global parameters -------------------------------------------------------
 
-rnaProject <- "PancT2D_AAvsEUonly"
+rnaProject <- "PancT2D_AAvsEUonly-doPar"
 regression.vars <- c("sequencerID", "SampleSex", "SampleAge")
 cum.var.thresh <- 90
 resolution <- 0.5
@@ -32,11 +34,11 @@ if(comp.type == "macbookPro"){
   rna.dir <- "/Users/heustonef/Desktop/Obesity/scRNA/"
   path_to_data <- "/Users/heustonef/Desktop/PancDB_data/scRNA_noBams"
   sourceable.functions <- list.files(path = "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepository/scMultiomics_MetaAnalysis/RFunctions", pattern = "*.R$", full.names = TRUE)
-  metadata.location <- "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepository/scMultiomics_MetaAnalysis/"
+  metadata.location <- "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/"
 } else if(comp.type == "biowulf"){
   rna.dir <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/"
   path_to_data <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/scRNA_transfer"
-  sourceable.functions <- list.files(path = "/data/CRGGH/heustonef/hpapdata/RFunctions/", pattern = "*.R", full.names = TRUE)
+  sourceable.functions <- list.files(path = "/data/CRGGH/heustonef/hpapdata/RFunctions", pattern = "*.R", full.names = TRUE)
   metadata.location <- "/data/CRGGH/heustonef/hpapdata/"
 }
 
@@ -48,9 +50,7 @@ library(patchwork)
 library(cowplot)
 library(foreach)
 library(doParallel)
-library(doMC)
-registerDoMC(cores = future::availableCores())
-# registerDoMC(cores=8)
+cl <- makeCluster(future::availableCores(), outfile = "")
 
 ##load local functions
 invisible(sapply(sourceable.functions, source))
@@ -65,38 +65,57 @@ sc.data <- sapply(list.dirs(path = path_to_data, recursive = FALSE, full.names =
                   basename, 
                   USE.NAMES = TRUE)
 sc.data <- sc.data[grepl(pattern = "^HPAP", sc.data)]
+
+# Select data based on inclusion criteria
 metadata <- read.table(file = paste0(metadata.location, "HPAPMetaData.txt"), header = TRUE, sep = "\t", row.names = 1)
+metadata <- metadata %>%
+  filter(grepl("Af|Cauc|Black", SampleEthnicity) &
+           # filter(grepl("Af", SampleEthnicity) & 
+           SimpDisease != "T1DM" & 
+           !grepl("Fluidigm", scRNA_Platform) & 
+           scRNA > 0)
+
 
 # Exclude samples that failed CellRanger QC
 for(i in sc.data){
   x <- strsplit(i, "_")[[1]][1]
   if(i %in% excluded.samples){
     sc.data <- sc.data[sc.data!=i]}
+  if(!(x %in% rownames(metadata))){
+    sc.data <- sc.data[sc.data!=i]
+  }
 }
 
 # clean up metadata table to exclude data not relevant to patient
 metadata <- metadata[,1:12]
 
-object.list <- c()
 
-# foreach(i=1:length(sc.data), .combine="c") %dopar% {
-for(i in 1:length(sc.data)){
-  object.list[[i]] <- Read10X_h5(paste0(names(sc.data)[i], "/outs/filtered_feature_bc_matrix.h5"))
-  object.list[[i]] <- CreateSeuratObject(object.list[[i]], 
-                                         project = rnaProject, 
-                                         min.cells = min.cells, 
-                                         min.features = min.features)
-  object.list[[i]]$orig.ident <- sc.data[[i]]
-  object.list[[i]] <- AssignMetadata(metadata.df = metadata, seurat.object = object.list[[i]])
-  object.list[[i]] <- PercentageFeatureSet(object.list[[i]], pattern = "MT-", col.name = "percent.mt")
+registerDoParallel(cl)
+object.list <- foreach(i=1:length(sc.data), .combine="c", .packages = 'Seurat') %dopar% {
+  # for(i in 1:length(sc.data)){
+  invisible(sapply(sourceable.functions, source))
+  object.item <- Read10X_h5(paste0(names(sc.data)[i], "/outs/filtered_feature_bc_matrix.h5"))
+  object.item <- CreateSeuratObject(object.item, 
+                                    project = rnaProject, 
+                                    min.cells = min.cells, 
+                                    min.features = min.features)
+  object.item$orig.ident <- sc.data[[i]]
+  object.item <- AssignMetadata(metadata.df = metadata, seurat.object = object.item)
+  object.item <- PercentageFeatureSet(object.item, pattern = "MT-", col.name = "percent.mt")
   
-  object.list[[i]] <- subset(object.list[[i]], 
-                             subset = nFeature_RNA >= 200 &
-                               nFeature_RNA <= 2500 &
-                               percent.mt <= 5)
-  
-  print(paste("finished", sc.data[[i]]))
+  object.item <- subset(object.item, 
+                        subset = nFeature_RNA >= 200 &
+                          nFeature_RNA <= 2500 &
+                          percent.mt <= 5)
+  if(length(Cells(object.item)) < 100){
+    print(paste0("Excluding ", sc.data[[i]], " because cell count = ", length(Cells(object.item))))
+    return(NULL)
+  } else{
+    print(paste("adding", sc.data[[i]], "to list"))
+    return(object.item)
+  }
 }
+
 seurat.object <- merge(object.list[[1]], y = object.list[2:length(object.list)], add.cell.ids = names(object.list))
 seurat.object$DonorID <- sapply(seurat.object$orig.ident, sub, pattern = "_.*", replacement = "")
 seurat.object$sequencerID <- seurat.object$orig.ident
@@ -139,21 +158,22 @@ if(do.sctransform == FALSE){ # standard method
   
 } else if(do.sctransform == "each"){
   print("Performing SCTransform")
-  object.list <- SplitObject(seurat.object, split.by = "orig.ident")
+  split.object <- SplitObject(seurat.object, split.by = "orig.ident")
   
-  # foreach(i=1:length(object.list), .combine="c") %dopar% {
-  for(i in 1:length(object.list)){
-    object.list <- lapply(X = object.list, 
-                          FUN = SCTransform, assay = "RNA", return.only.var.genes = FALSE, vst.flavor = "v2")
+  object.list <- foreach(i=1:length(split.object), .combine="c", .packages = c('Seurat', 'DoubletFinder', 'ggplot2', 'dplyr')) %dopar% {
+    object.item <- SCTransform(split.object[[i]], assay = "RNA", return.only.var.genes = FALSE, vst.flavor = "v2")
     
     # RUN DOUBLETFINDER AFTER UMAPhttps://github.com/kpatel427/YouTubeTutorials/blob/main/singleCell_doublets.R
-    object.list <- lapply(X = object.list, 
-                          FUN = runDoubletFinder, sctransformed = TRUE, tot.var = doublet.var.thresh, predicted.doubletRate = predicted.doubletRate)
-    # object.list <- lapply(X = object.list,
-    # FUN = CellCycleScoring, s.features = Seurat::cc.genes$s.genes, g2m.features = Seurat::cc.genes$g2m.genes)
-    object.list <- lapply(X = object.list,
-                          FUN = subset, subset = DF.classifications == "Singlet")
+    object.item <- runDoubletFinder(object.item, sctransformed = TRUE, tot.var = doublet.var.thresh, predicted.doubletRate = predicted.doubletRate)
+    object.item <- subset(object.item, subset = DF.classifications == "Singlet")
+    if(length(Cells(object.item)) < 100){
+      print(paste0("Excluding ", unique(object.item$orig.ident), " because corrected cell count = ", length(Cells(object.item))))
+      return(NULL)
+    }else{
+      return(object.item)
+    }
   }
+  
   integration.features <- SelectIntegrationFeatures(object.list = object.list, verbose = TRUE, nfeatures = 3000)
   object.list <- PrepSCTIntegration(object.list = object.list, anchor.features = integration.features, verbose = TRUE)
   integration.anchors <- FindIntegrationAnchors(object.list = object.list, anchor.features = integration.features, normalization.method = "SCT", verbose = TRUE)
@@ -216,7 +236,7 @@ seurat.object <- FindNeighbors(seurat.object, dims = 1:cluster.dims)
 seurat.object <- FindClusters(seurat.object, resolution = resolution)
 seurat.object <- RunUMAP(seurat.object, dims = 1:cluster.dims)
 
-saveRDS(seurat.object, file = paste0(rna.dir, "/", rnaProject, "-90pctvar.RDS"))
+saveRDS(seurat.object, file = paste0(rna.dir, "/", rnaProject, "-", as.character(tot.var), "pctvar.RDS"))
 
 
 ##umap
@@ -239,13 +259,13 @@ markers.seurat.pos <- FindAllMarkers(seurat.object, assay = "SCT", only.pos = TR
 markers.seurat.pos <- markers.seurat.pos %>% 
   group_by(cluster) %>%
   arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
-saveRDS(markers.seurat.pos, file = paste0(rnaProject, "-posmarkers-90pctvar.rds"))
+saveRDS(markers.seurat.pos, file = paste0(rnaProject, "-posmarkers-", as.character(tot.var), "pctvar.rds"))
 
 markers.seurat.all <- FindAllMarkers(seurat.object, assay = "SCT", only.pos = FALSE, min.pct = 0.25, logfc.threshold = 0.25)
 markers.seurat.all %>%
   group_by(cluster) %>%
   arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
-saveRDS(markers.seurat.all, file = paste0(rnaProject, "-allmarkers-90pctvar.rds"))
+saveRDS(markers.seurat.all, file = paste0(rnaProject, "-allmarkers-", as.character(tot.var), "pctvar.rds"))
 
 ##create workbook
 markers.table <- openxlsx::createWorkbook()
@@ -260,7 +280,7 @@ openxlsx::addWorksheet(markers.table, sheetName = "AllMarkers")
 openxlsx::writeData(markers.table, sheet = "AllMarkers", x = markers.seurat.all, startCol = 1, startRow = 1, colNames = TRUE)
 
 ##save workbook
-openxlsx::saveWorkbook(wb = markers.table, file = paste0(rnaProject, "_seuratMarkers-90pctvar.xlsx"), overwrite = TRUE, returnValue = TRUE)
+openxlsx::saveWorkbook(wb = markers.table, file = paste0(rnaProject, "_seuratMarkers-", as.character(tot.var), "pctvar.xlsx"), overwrite = TRUE, returnValue = TRUE)
 
 
 # Cell Cycle Scoring ------------------------------------------------------
@@ -281,14 +301,14 @@ DimPlot(seurat.object, cols = color.palette, group.by = "seurat_clusters", split
 FeaturePlot(seurat.object, features = "BMI", pt.size = 0.4, cols = c("blue", "red"))
 FeaturePlot(seurat.object, features = "BMI", pt.size = 0.4, cols = c("blue", "red"), split.by = "SCT_snn_res.0.5", ncol = 4)
 
-
+saveRDS(seurat.object, file = paste0(rna.dir, "/", rnaProject, "-", as.character(tot.var), "pctvar.RDS"))
 
 # Visualize after biowulf run ---------------------------------------------
 
-seurat.object <- readRDS("Obesity_scRNA-SCTRegression-NW-OB.RDS")
+# seurat.object <- readRDS("Obesity_scRNA-SCTRegression-NW-OB.RDS")
 colnames(seurat.object@meta.data)
 
-cds <- readRDS("Obesity_scRNA-SCTRegression-NW-OB-monocle3CDS.RDS")
+# cds <- readRDS("Obesity_scRNA-SCTRegression-NW-OB-monocle3CDS.RDS")
 
 # Differential abundance testing ------------------------------------------
 library(speckle)
@@ -357,3 +377,4 @@ get_earliest_principal_node <- function(cds){
 }
 cds <- order_cells(cds, root_pr_nodes=get_earliest_principal_node(cds))
 saveRDS(cds, file = paste0(rnaProject, "-monocle3CDS-90pctvar.RDS"))
+
