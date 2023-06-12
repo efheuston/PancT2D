@@ -24,7 +24,7 @@ if(comp.type == "macbookPro"){
 	working.dir <- "/data/CRGGH/heustonef/hpapdata/cellranger_snATAC"
 	records.dir <- working.dir
 	path_to_data <- c(list.dirs("/data/CRGGH/heustonef/hpapdata/cellranger_snATAC/cellrangerOuts/", full.names = TRUE, recursive = FALSE))
-	path_to_arrow_files <- "/data/CRGGH/heustonef/hpapdata/cellranger_snATAC/ArrowFiles/"
+	path_to_arrow_files <- "/data/CRGGH/heustonef/hpapdata/cellranger_snATAC/"
 	metadata.location <- "/data/CRGGH/heustonef/hpapdata/"
 	funtions.path <- "/data/CRGGH/heustonef/hpapdata/RFunctions/"
 	# library(vctrs, lib.loc = "/data/heustonef/Rlib_local/")
@@ -37,9 +37,9 @@ if(comp.type == "macbookPro"){
 library(dplyr)
 library(ArchR)
 library(harmony)
-library(foreach)
-library(doParallel)
-cl <- makeCluster(future::availableCores(), outfile = "")
+# library(foreach)
+# library(doParallel)
+# cl <- makeCluster(future::availableCores(), outfile = "")
 nThreads <- future::availableCores()
 addArchRGenome("hg38")
 addArchRThreads(threads = nThreads)
@@ -67,9 +67,7 @@ if(make.arrow.files == TRUE){
 		addTileMat = TRUE,
 		addGeneScoreMat = TRUE, force = TRUE
 	)
-	#identify doublets
 	dbltScores <- addDoubletScores(input = (arrowfiles), k = 10, knnMethod = "UMAP", LSIMethod = 1) #25 samples = 40min
-	
 	saveRDS(arrowfiles, paste0(atacProject, "-ArrowFiles.RDS"))
 }
 
@@ -77,7 +75,7 @@ if(make.arrow.files == TRUE){
 
 # Subset Arrow Files ------------------------------------------------------
 
-arrowfiles <- list.files(path = ".", pattern = "*.arrow")
+arrowfiles <- list.files(path = path_to_arrow_files, pattern = "*.arrow")
 arrowfiles <- sort(arrowfiles)
 
 # Select data based on inclusion criteria
@@ -85,6 +83,7 @@ metadata <- read.table(file = paste0(metadata.location, "HPAPMetaData.txt"), hea
 metadata <- metadata %>%
   filter(grepl("Af|Cauc|Black", SampleEthnicity) &
            SimpDisease != "T1DM" & 
+  			 	 SimpDisease != "NoDM" &
            !grepl("Fluidigm", scRNA_Platform) & 
            scATAC > 0)
 
@@ -104,7 +103,6 @@ metadata <- metadata[,1:12]
 
 
 
-
 # Create arch.proj -----------------------------------------------------
 
 arch.proj <- ArchRProject(ArrowFiles = sapply(arrowfiles, function(x){paste0(path_to_arrow_files, x)}), outputDirectory = working.dir, copyArrows = FALSE)
@@ -112,7 +110,7 @@ arch.proj <- ArchRProject(ArrowFiles = sapply(arrowfiles, function(x){paste0(pat
 # remove samples with unreasonable numbers of cells
 for(i in getSampleNames(arch.proj)){
   # print(paste(i, "-", length(which(arch.proj$Sample %in% i))))
-  if(length(which(arch.proj$Sample %in% i)) < 100){
+  if(length(which(arch.proj$Sample %in% i)) < 500){
     excluded.samples <- c(excluded.samples, i)
   }
   if(length(which(arch.proj$Sample %in% i)) > 20000){
@@ -160,6 +158,7 @@ plotGroups(
 	plotAs = "ridges") +
 	geom_vline(xintercept = log10(1000), lty = "dashed") +
 	geom_vline(xintercept = log10(30000), lty = "dashed")
+metadata$DonorID <- rownames(metadata)
 
 arch.proj@cellColData[,names(metadata)] <- lapply(names(metadata), function(x){
 	arch.proj@cellColData[[x]] <- metadata[match(vapply(strsplit(as.character(arch.proj$Sample), "_"), `[`, 1, FUN.VALUE = character(1)), metadata$DonorID), x]
@@ -207,6 +206,7 @@ saveArchRProject(ArchRProj = arch.proj, outputDirectory = working.dir, load = TR
 saveRDS(arch.proj, paste0(atacProject, "_Harmony.RDS"))
 
 
+
 arch.proj <- addUMAP(ArchRProj = arch.proj,
 										 reducedDims = "Harmony",
 										 name = "UMAP_harmony",
@@ -223,7 +223,7 @@ p2 <- plotEmbedding(ArchRProj = arch.proj, colorBy = "cellColData", name = paste
 ggAlignPlots(p1, p2, type = "h")
 
 table(getCellColData(ArchRProj = arch.proj, select = paste0("Harmony_res", as.character(res))))
-cM <- confusionMatrix(paste0(arch.proj$Harmony_res0.5), paste0(arch.proj$obesity)) # Could not automate this line
+cM <- confusionMatrix(paste0(arch.proj$Harmony_res0.5), paste0(arch.proj$SampleEthnicity)) # Could not automate this line
 cM <- cM / Matrix::rowSums(cM)
 pheatmap::pheatmap(
 	mat = as.matrix(cM),
@@ -231,7 +231,7 @@ pheatmap::pheatmap(
 	border_color = "black"
 )
 
-cM <- confusionMatrix(paste0(arch.proj@cellColData[,paste0("Harmony_res", as.character(res))]), paste0(arch.proj$obesity))
+cM <- confusionMatrix(paste0(arch.proj@cellColData[,paste0("Harmony_res", as.character(res))]), paste0(arch.proj$SampleEthnicity))
 cM <- cM / Matrix::rowSums(cM)
 pheatmap::pheatmap(
 	mat = as.matrix(cM),
@@ -274,15 +274,16 @@ saveArchRProject(ArchRProj = arch.proj, outputDirectory = working.dir, load = TR
 markerPeaks <- getMarkerFeatures(arch.proj, groupBy = paste0("Harmony_res", as.character(res)), useMatrix = "PeakMatrix", bias = c("TSSEnrichment", "log10(nFrags)"), testMethod = "wilcoxon")
 saveRDS(markerPeaks, file = paste0(atacProject, "-MarkerPeaks.RDS"))
 
+
 markerPeaks <- readRDS(paste0(atacProject, "-MarkerPeaks.RDS"))
 
 markerList <- getMarkers(markerPeaks, cutOff = "FDR <= 0.01 & Log2FC >= 1")
 heatmapPeaks <- plotMarkerHeatmap(seMarker = markerPeaks, cutOff = "FDR <= 0.1 & Log2FC >= 0.5", transpose = TRUE)
 
 
-arch.proj <- addMotifAnnotations(arch.proj, motifSet = "cisbp", name = "cisbp", force = TRUE)
-arch.proj <- addMotifAnnotations(arch.proj, motifSet = "encode", name = "encode", force = TRUE)
-arch.proj <- addMotifAnnotations(arch.proj, motifSet = "homer", name = "homer", force = TRUE)
+arch.proj <- addMotifAnnotations(arch.proj, motifSet = "cisbp", annoName = "cisbp", force = TRUE)
+arch.proj <- addMotifAnnotations(arch.proj, motifSet = "encode", annoName = "encode", force = TRUE)
+arch.proj <- addMotifAnnotations(arch.proj, motifSet = "homer", annoName = "homer", force = TRUE)
 saveArchRProject(ArchRProj = arch.proj, outputDirectory = working.dir, load = TRUE)
 
 
@@ -298,27 +299,17 @@ enrichcistrome <- peakAnnoEnrichment(seMarker = markerPeaks, ArchRProj = arch.pr
 heatmapcistrome <- plotEnrichHeatmap(enrichcistrome, n = 7, transpose = FALSE)
 ComplexHeatmap::draw(heatmapcistrome, heatmap_legend_side = "bot", annotation_legend_side = "bot")
 
-
-#enrichATAC <- peakAnnoEnrichment(seMarker = markerPeaks, ArchRProj = arch.proj, peakAnnotation = "ATAC", cutOff = "FDR <= 0.1 & Log2FC >= 0.5")
-#heatmapATAC <- plotEnrichmentHeatmap(enrichATAC, n = 7, transpose = TRUE)
-#ComplexHeatmap::draw(heatmapATAC, heatmap_legend_side = "bot", annotation_legend_side = "bot")
-
-
-
-
-# CUSTOM ENRICHMENT!!!! ---------------------------------------------------
-
-# https://www.archrproject.com/bookdown/custom-enrichment.html
-
-
 # Motif Deviations --------------------------------------------------------
 
-if("Motif" %ni% names(arch.proj@peakAnnotation)){
-	arch.proj <- addMotifAnnotations(arch.proj, motifSet = "cisbp", name = "Motif")
-}
 arch.proj <- addBgdPeaks(arch.proj)
-arch.proj <- addDeviationsMatrix(arch.proj, peakAnnotation = "Motif", force = TRUE)
-plotVarDev <- getVarDeviations(arch.proj, name = "MotifMatrix", plot = TRUE)
+if("cisbMotif" %ni% names(arch.proj@peakAnnotation)){
+	arch.proj <- addMotifAnnotations(arch.proj, motifSet = "cisbp", annoName = "cisbpMotif")
+}
+if("encodeMotif" %ni% names(arch.proj@peakAnnotation)){
+	arch.proj <- addMotifAnnotations(arch.proj, motifSet = "encode", annoName = "encodeMotif")
+}
+arch.proj <- addDeviationsMatrix(arch.proj, peakAnnotation = "encodeMotif", force = TRUE)
+plotVarDev <- getVarDeviations(arch.proj, name = "encodeMotifMatrix", plot = TRUE)
 saveArchRProject(ArchRProj = arch.proj, outputDirectory = working.dir, load = TRUE)
 
 

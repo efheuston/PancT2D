@@ -5,12 +5,32 @@
 .Ruserdata
 .DS_Store
 *.RDS
+*.rds
+*.arrow
 
 #Ignore raw sequencing data
 PancDB_data
+HPAP_downloads/*
 
 #Ignore archived files
 Archives/*
+Obesity_ArchR/*
+hpapdata/*
+*slurm*
+BackupArrowFiles/*
+tmp/*
+cellrangerOuts/*
+snATAC_transfer/*
+
+#Ignore ArchR bloat
+Annotations/*
+ArchRLogs/*
+Embeddings/*
+IterativeLSI/*
+PeakCalls/*
+Plots/*
+QualityControl/*
+GroupCoverages/*
 
 #Ignore web summaries
 web_summaries/
