@@ -17,12 +17,14 @@ if(comp.type == "macbookPro"){
 	working.dir <- "/Users/heustonef/Desktop/Obesity/snATAC/"
 	path_to_data <- c(list.dirs("/Users/heustonef/Desktop/PancDB_Data/scATAC_noBams/", full.names = TRUE, recursive = FALSE))
 	records.dir <- "~/OneDrive-NIH/SingleCellMetaAnalysis/GitRepository/scMultiomics_MetaAnalysis/"
-	metadata.location <- "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepository/scMultiomics_MetaAnalysis/"
+	path_to_arrow_files <- "/Users/heustonef/Desktop/Obesity/snATAC/ArrowFiles/"
+	metadata.location <- "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/"
 	functions.path <- "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepository/scMultiomics_MetaAnalysis/RFunctions/"
 } else if(comp.type == "biowulf"){
 	working.dir <- "/data/CRGGH/heustonef/hpapdata/cellranger_snATAC"
 	records.dir <- working.dir
 	path_to_data <- c(list.dirs("/data/CRGGH/heustonef/hpapdata/cellranger_snATAC/cellrangerOuts/", full.names = TRUE, recursive = FALSE))
+	path_to_arrow_files <- "/data/CRGGH/heustonef/hpapdata/cellranger_snATAC/ArrowFiles/"
 	metadata.location <- "/data/CRGGH/heustonef/hpapdata/"
 	funtions.path <- "/data/CRGGH/heustonef/hpapdata/RFunctions/"
 	# library(vctrs, lib.loc = "/data/heustonef/Rlib_local/")
@@ -52,7 +54,7 @@ writeLines(capture.output(sessionInfo()), paste0(atacProject, "_sessionInfo.txt"
 # Generate arrowFiles -----------------------------------------------------
 
 
-if(make.arrow.files == FALSE){
+if(make.arrow.files == TRUE){
 	for(i in path_to_data){
 		ifelse(file.exists(paste0(i, "/outs")),"", path_to_data <-path_to_data[!path_to_data %in% i])
 	}
@@ -65,6 +67,9 @@ if(make.arrow.files == FALSE){
 		addTileMat = TRUE,
 		addGeneScoreMat = TRUE, force = TRUE
 	)
+	#identify doublets
+	dbltScores <- addDoubletScores(input = (arrowfiles), k = 10, knnMethod = "UMAP", LSIMethod = 1) #25 samples = 40min
+	
 	saveRDS(arrowfiles, paste0(atacProject, "-ArrowFiles.RDS"))
 }
 
@@ -98,17 +103,25 @@ for(i in arrowfiles){
 metadata <- metadata[,1:12]
 
 
-# Identify doublets -------------------------------------------------------
-dbltScores <- addDoubletScores(input = (arrowfiles), k = 10, knnMethod = "UMAP", LSIMethod = 1) #25 samples = 40min
 
 
 # Create arch.proj -----------------------------------------------------
 
-arch.proj <- ArchRProject(ArrowFiles = arrowfiles, outputDirectory = working.dir, copyArrows = FALSE)
+arch.proj <- ArchRProject(ArrowFiles = sapply(arrowfiles, function(x){paste0(path_to_arrow_files, x)}), outputDirectory = working.dir, copyArrows = FALSE)
 
-arch.proj
-paste0("Memory Size = ", rounds(object.size(arch.proj)/10^6, 3), " MB")
-getAvailableMatrices(arch.proj)
+# remove samples with unreasonable numbers of cells
+for(i in getSampleNames(arch.proj)){
+  # print(paste(i, "-", length(which(arch.proj$Sample %in% i))))
+  if(length(which(arch.proj$Sample %in% i)) < 100){
+    excluded.samples <- c(excluded.samples, i)
+  }
+  if(length(which(arch.proj$Sample %in% i)) > 20000){
+    excluded.samples <- c(excluded.samples, i)
+  }
+}
+arch.proj <- arch.proj[which(arch.proj$Sample %ni% excluded.samples),]
+saveArchRProject(ArchRProj = arch.proj, outputDirectory = working.dir, load = TRUE)
+
 
 cellcoldata <- getCellColData(arch.proj, select = c("log10(nFrags)", "TSSEnrichment"))
 
@@ -152,12 +165,6 @@ arch.proj@cellColData[,names(metadata)] <- lapply(names(metadata), function(x){
 	arch.proj@cellColData[[x]] <- metadata[match(vapply(strsplit(as.character(arch.proj$Sample), "_"), `[`, 1, FUN.VALUE = character(1)), metadata$DonorID), x]
 }
 )
-# arch.proj$obesity <- NA
-# arch.proj$obesity[arch.proj$BMI >=30] <- 'obese'
-# arch.proj$obesity[arch.proj$BMI <= 25] <- 'nonobese'
-saveArchRProject(ArchRProj = arch.proj, outputDirectory = working.dir, load = TRUE)
-# loadArchRProject(path = working.dir)
-# saveRDS(arch.proj, paste0(atacProject, "_noFilters.RDS"))
 
 # Filter  ---------------------------------------------------------
 
@@ -187,10 +194,6 @@ arch.proj <- addIterativeLSI(
 # Run Harmony -------------------------------------------------------------
 
 
-# harmony.groups <- colnames(arch.proj@cellColData)
-# harmony.groups <- harmony.groups[!(harmony.groups %in% testable.factors)]
-arch.proj@cellColData <- arch.proj@cellColData[,!names(arch.proj@cellColData) %in% c("TissueSource", "scRNA", "scATAC", "scMultiome", "BulkRNA", "BulkATAC")]
-
 # factorize regression columns
 arch.proj$SampleAge <- as.factor(arch.proj$SampleAge)
 arch.proj <- addHarmony(ArchRProj = arch.proj, 
@@ -198,7 +201,7 @@ arch.proj <- addHarmony(ArchRProj = arch.proj,
 												name = "Harmony", 
 												groupBy = c("Sample", "SampleSex", "SampleAge"), 
 												max.iter.harmony = 20, #did not converge after 10
-												force = TRUE) # addHarmony "grouby" defines variables to correct for
+												force = TRUE) # addHarmony "groupby" defines variables to correct for
 
 saveArchRProject(ArchRProj = arch.proj, outputDirectory = working.dir, load = TRUE)
 saveRDS(arch.proj, paste0(atacProject, "_Harmony.RDS"))
