@@ -10,7 +10,7 @@
 # Global parameters -------------------------------------------------------
 
 ## frequently modified
-atacProject <- "HPAP-099_FGC2381_test"
+atacProject <- "Test_snATACSeq-Signac"
 working.dir <- "./"
 records.dir <- "~/OneDrive/SingleCellMetaAnalysis/GitRepositories/PancT2D/"
 res <- 0.5
@@ -100,78 +100,94 @@ metadata <- metadata[,1:12]
 
 
 # Preprocess data ---------------------------------------------------------
-
+atac.object <- c()
 for(i in 1:length(sc.data)){
-  counts <- Read10X_h5(filename = paste0(names(sc.data)[i], "/outs/filtered_peak_bc_matrix.h5"))
-  chrom_assay <- CreateChromatinAssay(counts = counts, 
-                                      sep = c(":", "-"),
-                                      genome = genome,
-                                      fragments = paste0(names(sc.data)[i], "/outs/fragments.tsv.gz"), 
-                                      min.cells = 10,
-                                      min.features = 200
-  )
-  
-  seurat.atac <- CreateSeuratObject(counts = chrom_assay,
-                                    assay = "peaks", 
-                                    meta.data = read.csv(file = paste0(names(sc.data)[i], "/outs/singlecell.csv"), 
-                                                         header = TRUE,
-                                                         row.names = 1),
-                                    project = sc.data[i]
-  )
-  seurat.atac <- AssignMetadata(metadata.df = metadata, seurat.object = seurat.atac)
-  # remove(counts, chrom_assay)
+    atac.object <- c(atac.object, SignacObjectFromCellranger(samples.list = sc.data, list.index = i))
 }
 
 # Examine Seurat object ---------------------------------------------------
 
-seurat.atac[['peaks']]
-granges(seurat.atac)
+atac.object[['peaks']]
+granges(atac.object)
 
 ##extract annotations
 
 annotations <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
 seqlevelsStyle(annotations) <- 'UCSC'
-Annotation(seurat.atac) <- annotations
+Annotation(atac.object) <- annotations
 
 
 # QC Metrics --------------------------------------------------------------
 
-sample.name <- unique(seurat.atac$orig.ident) ## change once code is parallelized
+sample.name <- unique(atac.object$orig.ident) ## change once code is parallelized
 
-seurat.atac <- NucleosomeSignal(object = seurat.atac)
-seurat.atac <- TSSEnrichment(object = seurat.atac, fast = FALSE)
-seurat.atac$pct_reads_in_peaks <- seurat.atac$peak_region_fragments / seurat.atac$passed_filters * 100
-seurat.atac$blacklist_ratio <- seurat.atac$blacklist_region_fragments / seurat.atac$peak_region_fragments
+atac.object <- NucleosomeSignal(object = atac.object)
+atac.object <- TSSEnrichment(object = atac.object, fast = FALSE)
+atac.object$pct_reads_in_peaks <- atac.object$peak_region_fragments / atac.object$passed_filters * 100
 
-DensityScatter(seurat.atac, x = 'nCount_peaks', y = 'TSS.enrichment', log_x = TRUE, quantiles = TRUE)
 
-p1 <- DensityScatter(seurat.atac, x = 'nCount_peaks', y = 'TSS.enrichment', log_x = TRUE, quantiles = TRUE)
+# Calculate blacklist depending on if included in singlecell.csv file
+
+if(!any(atac.object$blacklist_region_fragments>0)){
+  print("blacklist not calculated in singlecell.csv; using Signac::FractionCountsInRegion")
+  atac.object$blacklist_ratio <- FractionCountsInRegion(
+    object = atac.object,
+    assay = 'peaks',
+    regions = blacklist_hg38
+  )
+} else {
+  atac.object$blacklist_ratio <- atac.object$blacklist_region_fragments / atac.object$peak_region_fragments
+}
+
+
+DensityScatter(atac.object, x = 'nCount_peaks', y = 'TSS.enrichment', log_x = TRUE, quantiles = TRUE)
+
+p1 <- DensityScatter(atac.object, x = 'nCount_peaks', y = 'TSS.enrichment', log_x = TRUE, quantiles = TRUE)
 if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_QC-DenScat.png"), plot.fig = p1)}else{plot(p1)} 
-seurat.atac$high.tss <- ifelse(seurat.atac$TSS.enrichment > 3, 'High', 'Low')
-p1 <- TSSPlot(seurat.atac, group.by = 'high.tss') + NoLegend()
+atac.object$high.tss <- ifelse(atac.object$TSS.enrichment > 3, 'High', 'Low')
+p1 <- TSSPlot(atac.object, group.by = 'high.tss') + NoLegend()
 if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_QC-TSSPlot.png"), plot.fig = p1)}else{plot(p1)} 
 
-seurat.atac$nucleosome_group <- ifelse(seurat.atac$nucleosome_signal > 4, 'NS > 4', 'NS < 4')
-p1 <- FragmentHistogram(object = seurat.atac, group.by = 'nucleosome_group')
+atac.object$nucleosome_group <- ifelse(atac.object$nucleosome_signal > 4, 'NS > 4', 'NS < 4')
+p1 <- FragmentHistogram(object = atac.object, group.by = 'nucleosome_group')
 if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_QC-FragHist.png"), plot.fig = p1)}else{plot(p1)} 
 
-p1 <- VlnPlot(object = seurat.atac,
+p1 <- VlnPlot(object = atac.object,
         features = c("nCount_peaks", "TSS.enrichment", "blacklist_ratio", "nucleosome_signal", "pct_reads_in_peaks"),
         pt.size = 0.1,
         ncol = 5
 )
-
 if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_QC-Vln.png"), plot.fig = p1)}else{plot(p1)} 
 
 
 
+# subset object
+atac.object <- subset(
+  x = atac.object,
+  subset = nCount_peaks > 3000 &
+    nCount_peaks < 30000 &
+    pct_reads_in_peaks > 15 &
+    blacklist_ratio < 0.05 &
+    nucleosome_signal < 4 &
+    TSS.enrichment > 3
+)
 
+atac.object
 
+atac.object <- RunTFIDF(atac.object)
+atac.object <- FindTopFeatures(atac.object, min.cutoff = 'q0')
+atac.object <- RunSVD(atac.object)
+p1 <- DepthCor(atac.object)
+if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_DimRed-DepthCor.png"), plot.fig = p1)}else{plot(p1)}
 
+atac.object <- RunUMAP(atac.object, reduction = "lsi", dims = 2:30)
+atac.object <- FindNeighbors(atac.object, reduction = "lsi", dims = 2:30)
+atac.object <- FindClusters(atac.object, verbose = TRUE, algorithm = 3)
+p1 <- DimPlot(atac.object, label = TRUE) + NoLegend()
 
+if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_DimPlot-Clst.png"), plot.fig = p1)}else{plot(p1)}
 
-
-
+#https://nbisweden.github.io/workshop-scRNAseq/labs/compiled/seurat/seurat_04_clustering.html
 
 
 
