@@ -100,59 +100,59 @@ metadata <- metadata[,1:12]
 
 
 # Preprocess data ---------------------------------------------------------
-atac.object <- c()
+seurat.atac <- c()
 for(i in 1:length(sc.data)){
-    atac.object <- c(atac.object, SignacObjectFromCellranger(samples.list = sc.data, list.index = i))
+    seurat.atac <- c(seurat.atac, SignacObjectFromCellranger(samples.list = sc.data, list.index = i))
 }
 
 # Examine Seurat object ---------------------------------------------------
 
-atac.object[['peaks']]
-granges(atac.object)
+seurat.atac[['peaks']]
+granges(seurat.atac)
 
 ##extract annotations
 
 annotations <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
 seqlevelsStyle(annotations) <- 'UCSC'
-Annotation(atac.object) <- annotations
+Annotation(seurat.atac) <- annotations
 
 
 # QC Metrics --------------------------------------------------------------
 
-sample.name <- unique(atac.object$orig.ident) ## change once code is parallelized
+sample.name <- unique(seurat.atac$orig.ident) ## change once code is parallelized
 
-atac.object <- NucleosomeSignal(object = atac.object)
-atac.object <- TSSEnrichment(object = atac.object, fast = FALSE)
-atac.object$pct_reads_in_peaks <- atac.object$peak_region_fragments / atac.object$passed_filters * 100
+seurat.atac <- NucleosomeSignal(object = seurat.atac)
+seurat.atac <- TSSEnrichment(object = seurat.atac, fast = FALSE)
+seurat.atac$pct_reads_in_peaks <- seurat.atac$peak_region_fragments / seurat.atac$passed_filters * 100
 
 
 # Calculate blacklist depending on if included in singlecell.csv file
 
-if(!any(atac.object$blacklist_region_fragments>0)){
+if(!any(seurat.atac$blacklist_region_fragments>0)){
   print("blacklist not calculated in singlecell.csv; using Signac::FractionCountsInRegion")
-  atac.object$blacklist_ratio <- FractionCountsInRegion(
-    object = atac.object,
+  seurat.atac$blacklist_ratio <- FractionCountsInRegion(
+    object = seurat.atac,
     assay = 'peaks',
     regions = blacklist_hg38
   )
 } else {
-  atac.object$blacklist_ratio <- atac.object$blacklist_region_fragments / atac.object$peak_region_fragments
+  seurat.atac$blacklist_ratio <- seurat.atac$blacklist_region_fragments / seurat.atac$peak_region_fragments
 }
 
 
-DensityScatter(atac.object, x = 'nCount_peaks', y = 'TSS.enrichment', log_x = TRUE, quantiles = TRUE)
+DensityScatter(seurat.atac, x = 'nCount_peaks', y = 'TSS.enrichment', log_x = TRUE, quantiles = TRUE)
 
-p1 <- DensityScatter(atac.object, x = 'nCount_peaks', y = 'TSS.enrichment', log_x = TRUE, quantiles = TRUE)
+p1 <- DensityScatter(seurat.atac, x = 'nCount_peaks', y = 'TSS.enrichment', log_x = TRUE, quantiles = TRUE)
 if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_QC-DenScat.png"), plot.fig = p1)}else{plot(p1)} 
-atac.object$high.tss <- ifelse(atac.object$TSS.enrichment > 3, 'High', 'Low')
-p1 <- TSSPlot(atac.object, group.by = 'high.tss') + NoLegend()
+seurat.atac$high.tss <- ifelse(seurat.atac$TSS.enrichment > 3, 'High', 'Low')
+p1 <- TSSPlot(seurat.atac, group.by = 'high.tss') + NoLegend()
 if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_QC-TSSPlot.png"), plot.fig = p1)}else{plot(p1)} 
 
-atac.object$nucleosome_group <- ifelse(atac.object$nucleosome_signal > 4, 'NS > 4', 'NS < 4')
-p1 <- FragmentHistogram(object = atac.object, group.by = 'nucleosome_group')
+seurat.atac$nucleosome_group <- ifelse(seurat.atac$nucleosome_signal > 4, 'NS > 4', 'NS < 4')
+p1 <- FragmentHistogram(object = seurat.atac, group.by = 'nucleosome_group')
 if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_QC-FragHist.png"), plot.fig = p1)}else{plot(p1)} 
 
-p1 <- VlnPlot(object = atac.object,
+p1 <- VlnPlot(object = seurat.atac,
         features = c("nCount_peaks", "TSS.enrichment", "blacklist_ratio", "nucleosome_signal", "pct_reads_in_peaks"),
         pt.size = 0.1,
         ncol = 5
@@ -162,8 +162,8 @@ if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_QC-Vln.png"
 
 
 # subset object
-atac.object <- subset(
-  x = atac.object,
+seurat.atac <- subset(
+  x = seurat.atac,
   subset = nCount_peaks > 3000 &
     nCount_peaks < 30000 &
     pct_reads_in_peaks > 15 &
@@ -172,26 +172,51 @@ atac.object <- subset(
     TSS.enrichment > 3
 )
 
-atac.object
+seurat.atac
 
-atac.object <- RunTFIDF(atac.object)
-atac.object <- FindTopFeatures(atac.object, min.cutoff = 'q0')
-atac.object <- RunSVD(atac.object)
-p1 <- DepthCor(atac.object)
+
+# Linear dimensional reduction --------------------------------------------
+
+seurat.atac <- RunTFIDF(seurat.atac)
+seurat.atac <- FindTopFeatures(seurat.atac, min.cutoff = 'q0')
+seurat.atac <- RunSVD(seurat.atac)
+p1 <- DepthCor(seurat.atac)
 if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_DimRed-DepthCor.png"), plot.fig = p1)}else{plot(p1)}
 
-atac.object <- RunUMAP(atac.object, reduction = "lsi", dims = 2:30)
-atac.object <- FindNeighbors(atac.object, reduction = "lsi", dims = 2:30)
-atac.object <- FindClusters(atac.object, verbose = TRUE, algorithm = 3)
-p1 <- DimPlot(atac.object, label = TRUE) + NoLegend()
+# Non-linear dimensional reduction  -------------------------
+
+seurat.atac <- RunUMAP(seurat.atac, reduction = "lsi", dims = 2:30)
+seurat.atac <- FindNeighbors(seurat.atac, reduction = "lsi", dims = 2:30)
+seurat.atac <- FindClusters(seurat.atac, verbose = TRUE, algorithm = 3)
+p1 <- DimPlot(seurat.atac, label = TRUE) + NoLegend()
 
 if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_DimPlot-Clst.png"), plot.fig = p1)}else{plot(p1)}
 
 #https://nbisweden.github.io/workshop-scRNAseq/labs/compiled/seurat/seurat_04_clustering.html
 
 
+# Gene activity matrix by accessibility frequency -------------------------
+
+#fragment count in promoters and TSS
+gene.activities <- GeneActivity(seurat.atac)
+seurat.atac[['GeneActivity']] <- CreateAssayObject(counts = gene.activities)
+seurat.atac <- NormalizeData(seurat.atac, assay = "GeneActivity", normalization.method = "LogNormalize", scale.factor = median(seurat.atac$nCount_GeneActivity))
+
+#Cicero
 
 
+
+# Integrate with scRNA data -----------------------------------------------
+
+#Is on the to-do list
+
+
+
+# Differentially accessible peaks -----------------------------------------
+
+DefaultAssay(seurat.atac) <- 'peaks'
+
+da_peaks <- FindAllMarkers(seurat.atac, assay = "peaks", test.use = "LR", latent.vars = "nCount_peaks")
 
 
 
