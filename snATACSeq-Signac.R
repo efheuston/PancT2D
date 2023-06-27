@@ -26,6 +26,7 @@ min.features <- 200
 genome <- "hg38" # Use `registered_UCSC_genomes()`
 excluded.samples <- NULL
 fig.export <- FALSE
+fc.cutoff <- 3
 #run.jackstraw <- TRUE
 
 
@@ -49,11 +50,14 @@ if(grepl("mac", comp.type, ignore.case = TRUE)){
 
 library(Signac)
 library(Seurat)
+library(cicero)
+library(SeuratWrappers)
 library(patchwork)
 library(ggplot2)
 library(GenomeInfoDb)
 library(EnsDb.Hsapiens.v86)
 library(dplyr)
+library(GenomicRanges)
 # library(foreach)
 # library(doParallel)
 # cl <- makeCluster(future::availableCores(), outfile = "")
@@ -62,6 +66,8 @@ library(dplyr)
 ##load local functions
 invisible(sapply(sourceable.functions, source))
 
+
+# Preprocess data ---------------------------------------------------------
 
 ## load data list
 sc.data <- sapply(list.dirs(path = path_to_data, recursive = FALSE, full.names = TRUE), 
@@ -97,18 +103,49 @@ for(i in sc.data){
 # clean up metadata table to exclude data not relevant to patient
 metadata <- metadata[,1:12]
 
+#Combined peak set
+sample.peaks <- lapply(1:length(sc.data), function(x){
+  read.table(
+    file = paste0(names(sc.data)[x], "/outs/peaks.bed"),
+    col.names = c("chr", "start", "end")
+  )
+  }
+)
+gr.data <- sapply(sample.peaks, makeGRangesFromDataFrame)
+gr.data <- GRangesList(gr.data)
+combined.peaks <-reduce(x = c(unlist(gr.data)))
+
+names(gr.data) <- sc.data
+
+peak.widths <- width(combined.peaks)
+combined.peaks <- combined.peaks[peak.widths < 10000 & peak.widths > 20]
+# 
+# # Fragment objects
+# sample.fragments <- lapply(1:length(sc.data), function(x){
+#   read.table(
+#     file = paste0(names(sc.data)[x], "/outs/singlecell.csv"),
+#     stringsAsFactors = FALSE,
+#     sep = ",",
+#     header = TRUE,
+#     row.names = 1)[-1,]
+# }
+# )
+# sample.fragments <- lapply(sample.fragments, function(x){x[x$passed_filters > 500,]})
+# 
+# sample.fragments <- lapply(names(sc.data), function(x){GenerateATACFragementObjects(x)})
+seurat.atac <- c()
+seurat.atac <- lapply(names(sc.data), function(x) {SignacObjectFromCommonPeakset(x, combined.peaks)})
 
 
-# Preprocess data ---------------------------------------------------------
+
+
+#FINISH MERGE FUNCTION BEFORE NEXT STEP!!
 seurat.atac <- c()
 for(i in 1:length(sc.data)){
     seurat.atac <- c(seurat.atac, SignacObjectFromCellranger(samples.list = sc.data, list.index = i))
 }
 
 # Examine Seurat object ---------------------------------------------------
-
-seurat.atac[['peaks']]
-granges(seurat.atac)
 
 ##extract annotations
 
@@ -188,6 +225,9 @@ if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_DimRed-Dept
 seurat.atac <- RunUMAP(seurat.atac, reduction = "lsi", dims = 2:30)
 seurat.atac <- FindNeighbors(seurat.atac, reduction = "lsi", dims = 2:30)
 seurat.atac <- FindClusters(seurat.atac, verbose = TRUE, algorithm = 3)
+
+saveRDS(seurat.atac, file = paste0(atacProject, "_SignacObject.RDS"))
+
 p1 <- DimPlot(seurat.atac, label = TRUE) + NoLegend()
 
 if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_DimPlot-Clst.png"), plot.fig = p1)}else{plot(p1)}
@@ -201,8 +241,24 @@ if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_DimPlot-Cls
 gene.activities <- GeneActivity(seurat.atac)
 seurat.atac[['GeneActivity']] <- CreateAssayObject(counts = gene.activities)
 seurat.atac <- NormalizeData(seurat.atac, assay = "GeneActivity", normalization.method = "LogNormalize", scale.factor = median(seurat.atac$nCount_GeneActivity))
+saveRDS(seurat.atac, file = paste0(atacProject, "_SignacObject.RDS"))
 
 #Cicero
+
+cicero.atac <- as.cell_data_set(x = seurat.atac)
+cicero.atac <- make_cicero_cds(cicero.atac)
+
+genome <- seqlengths(seurat.atac)[1]
+genome.df <- data.frame("chr" = names(genome), "length" <- genome)
+conns <- run_cicero(cicero.atac, genomic_coords = genome.df, sample_num = 100)
+saveRDS(conns, file = paste0(atacProject, "_ciceroConnections.RDS"))
+
+ccans <- generate_ccans(conns)
+saveRDS(conns, file = paste0(atacProject, "_ciceroNetworks.RDS"))
+
+seurat.links <- ConnectionsToLinks(conns = conns, ccans = ccans)
+Links(seurat.atac) <- seurat.links
+saveRDS(seurat.atac, file = paste0(atacProject, "_SignacObject.RDS"))
 
 
 
@@ -216,13 +272,42 @@ seurat.atac <- NormalizeData(seurat.atac, assay = "GeneActivity", normalization.
 
 DefaultAssay(seurat.atac) <- 'peaks'
 
-da_peaks <- FindAllMarkers(seurat.atac, assay = "peaks", test.use = "LR", latent.vars = "nCount_peaks")
+da.peaks <- FindAllMarkers(seurat.atac, assay = "peaks", test.use = "LR", latent.vars = "nCount_peaks")
+saveRDS(da.peaks, file = paste0(atacProject, "_daPeaks-all.RDS"))
+
+p1 <- VlnPlot(seurat.atac, features = rownames(da.peaks)[1], pt.size = 0.1)
+p2 <- FeaturePlot(seurat.atac, features = rownmaes(da.peaks)[1], pt.size = 0.1, max.cutoff = 'q95')
+
+if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_daPeaks-all.png"), plot.fig = c(p1, p2))}else{plot(p1, p2)}
+
+gene.fcup <- ClosestFeature(seurat.atac, rownames(da.peaks[da.peaks$avg_log2FC > fc.cutoff, ]))
+gene.fcdn <- ClosestFeature(seurat.atac, rownames(da.peaks[da.peaks$avg_log2FC < -1*fc.cutoff, ]))
+
+
+##create workbook
+markers.table <- openxlsx::createWorkbook()
+
+
+##write positive markers to table
+openxlsx::addWorksheet(gene.fcup, sheetName = paste0("FC", as.character(fc.cutoff), "up"))
+openxlsx::writeData(gene.fcup, sheet = paste0("FC", as.character(fc.cutoff), "up"), x = gene.fcup, startCol = 1, startRow = 1, colNames = TRUE)
+
+##write all markers to table
+openxlsx::addWorksheet(markers.table, sheetName = paste0("FC", as.character(fc.cutoff), "dn"))
+openxlsx::writeData(markers.table, sheet = paste0("FC", as.character(fc.cutoff), "dn"), x = gene.fcdn, startCol = 1, startRow = 1, colNames = TRUE)
+
+##save workbook
+openxlsx::saveWorkbook(wb = markers.table, file = paste0(atacProject, "_closestGene-", as.character(cum.var.thresh), "pctvar.xlsx"), overwrite = TRUE, returnValue = TRUE)
 
 
 
 
+# Plotting genomic regions ------------------------------------------------
 
-
+#Can set plotting order of regions
+#levels(seurat.atac) <- c()
+p1 <- CoveragePlot(seurat.atac, region = c("INS", "GCG"), extend.upsteram = 1000, extend.downstream = 1000, ncol = 1)
+if(fig.export == TRUE){export.figs(plot.name = paste0(sample.name, "_CoveragePlot-all.png"), plot.fig = p1)}else{plot(p1)}
 
 
 
