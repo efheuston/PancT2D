@@ -2,7 +2,7 @@
 # Sample data is from [PandDB](https://hpap.pmacs.upenn.edu/)
 # Works through Signac
 
-# Start by testing on HPAP-099_FGC2381
+# Start by testing on HPAP-099_FGC2381 & HPAP-100_FGC2414
 
 # RUN NOTES
 # as of 2023.06.16: must use remotes::install_github("stuart-lab/signac", ref = "seurat5") branch for TSS plots to work
@@ -103,6 +103,8 @@ for(i in sc.data){
 # clean up metadata table to exclude data not relevant to patient
 metadata <- metadata[,1:12]
 
+# Create seurat objects ---------------------------------------------------
+
 #Combined peak set
 sample.peaks <- lapply(1:length(sc.data), function(x){
   read.table(
@@ -119,31 +121,11 @@ names(gr.data) <- sc.data
 
 peak.widths <- width(combined.peaks)
 combined.peaks <- combined.peaks[peak.widths < 10000 & peak.widths > 20]
-# 
-# # Fragment objects
-# sample.fragments <- lapply(1:length(sc.data), function(x){
-#   read.table(
-#     file = paste0(names(sc.data)[x], "/outs/singlecell.csv"),
-#     stringsAsFactors = FALSE,
-#     sep = ",",
-#     header = TRUE,
-#     row.names = 1)[-1,]
-# }
-# )
-# sample.fragments <- lapply(sample.fragments, function(x){x[x$passed_filters > 500,]})
-# 
-# sample.fragments <- lapply(names(sc.data), function(x){GenerateATACFragementObjects(x)})
+
 seurat.atac <- c()
 seurat.atac <- lapply(names(sc.data), function(x) {SignacObjectFromCommonPeakset(x, combined.peaks)})
 
 
-
-
-#FINISH MERGE FUNCTION BEFORE NEXT STEP!!
-seurat.atac <- c()
-for(i in 1:length(sc.data)){
-    seurat.atac <- c(seurat.atac, SignacObjectFromCellranger(samples.list = sc.data, list.index = i))
-}
 
 # Examine Seurat object ---------------------------------------------------
 
@@ -209,7 +191,26 @@ seurat.atac <- subset(
     TSS.enrichment > 3
 )
 
-seurat.atac
+temp <- seurat.atac[[1]]
+
+
+# Doublet detection  --------------------------------------------
+# Can try scrublet, as tested in https://www.nature.com/articles/s41467-021-21583-9#Sec8, using the Seurat's Label transfer methods
+# Can import doublet enrichment scores from ArchR
+# Can us Amulet method and/or scDblFinder (Doublet identifiation in single-cell ATAC-seq)
+
+#import doublet scores from ArchR
+doublet.df <- read.csv(file = paste0(atac.dir, "ArchR_allSampleProj-cellColData.txt"),
+                       sep = "\t", header = TRUE,
+                       row.names = 1)
+doublet.df <- doublet.df[,grepl("Doublet|Sample", colnames(doublet.df), ignore.case = TRUE)]
+doublet.df$cellID <- sapply(strsplit(rownames(doublet.df),"#"), `[`, 2)
+
+
+
+head(seurat.atac[[1]]@meta.data)
+
+
 
 
 # Linear dimensional reduction --------------------------------------------
