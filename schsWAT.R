@@ -15,8 +15,8 @@ rnaProject <- "schsWAT"
 regression.vars <- c("mitochondrial_percent", "ribosomal_protein_percent", "cell_cycle__phase")
 cum.var.thresh <- 95
 resolution <- 0.5
-comp.type <- "biowulf" # one of macbookPro, biowulf
-do.sctransform <- "pooled" # one of FALSE, each, pooled
+comp.type <- "mac" # one of macbookPro, biowulf
+do.sctransform <- "each" # one of FALSE, each, pooled
 
 ## infrequently modified
 do.doubletFinder <- TRUE
@@ -30,12 +30,13 @@ excluded.samples <- c()
 
 # Directories -------------------------------------------------------------
 
-if(comp.type == "macbookPro"){
+if(grepl("mac", comp.type, ignore.case = TRUE)){
   rna.dir <- "/Users/heustonef/Desktop/PancDB_Data/PancT2D/"
-  # path_to_data <- "/Users/heustonef/Desktop/PancDB_data/scRNA_noBams"
-  sourceable.functions <- list.files(path = "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepositories/RFunctions/", pattern = "*.R$", full.names = TRUE)
+  path_to_data <- "/Users/heustonef/Desktop/PancDB_Data/PancT2D/SingleCell-AdiposeTissue-Broad/"
+  sourceable.functions <- list.files(path = "/Users/heustonef/Library/CloudStorage/OneDrive-NationalInstitutesofHealth/SingleCellMetaAnalysis/GitRepositories/RFunctions/",
+                                     pattern = "*.R$", full.names = TRUE)
   metadata.location <- "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/"
-} else if(comp.type == "biowulf"){
+} else if(grepl("biowulf", comp.type, ignore.case = TRUE)){
   rna.dir <- "/data/CRGGH/heustonef/broadSingleCellPortalDownloads/schsWAT/PancT2D/"
   path_to_data <- "/data/CRGGH/heustonef/broadSingleCellPortalDownloads/schsWAT/"
   sourceable.functions <- list.files(path = "/data/CRGGH/heustonef/hpapdata/RFunctions", pattern = "*.R", full.names = TRUE)
@@ -48,9 +49,11 @@ library(dplyr)
 library(Seurat)
 library(patchwork)
 library(cowplot)
-library(foreach)
-library(doParallel)
-cl <- makeCluster(future::availableCores(), outfile = "")
+if(grepl("biowulf", comp.type, ignore.case = TRUE)){
+  library(foreach)
+  library(doParallel)
+  cl <- makeCluster(future::availableCores(), outfile = "")
+}
 
 ##load local functions
 invisible(sapply(sourceable.functions, source))
@@ -60,13 +63,25 @@ invisible(sapply(sourceable.functions, source))
 try(setwd(rna.dir), silent = TRUE)
 writeLines(capture.output(sessionInfo()), paste0(rnaProject, "_sessionInfo.txt"))
 
-#data are provided as barcode, features, and matrix file with metadata. creating an object from this
+#Technologies are 10X and DropSeq. Keeping these seperate and integrating
+#data are provided as barcode, features, and matrix file with metadata. creating objects from this
 
-sc.data <- ReadMtx(mtx = paste0(path_to_data, "Hs10X.counts.mtx.gz"), 
-									 cells = paste0(path_to_data, "Hs10X.counts.barcodes.tsv.gz"), 
-									 features = paste0(path_to_data, "Hs10X.counts.features.tsv.gz"))
+
+sc.data <- ReadMtx(mtx = paste0(path_to_data, "10X_raw/Hs10X.counts.mtx.gz"), 
+									 cells = paste0(path_to_data, "10X_raw/Hs10X.counts.barcodes.tsv.gz"), 
+									 features = paste0(path_to_data, "10X_raw/Hs10X.counts.features.tsv.gz"))
 metadata <- read.csv(file = paste0(path_to_data, "Hs.metadata.tsv"), header = TRUE, sep = "\t", row.names = 1)
-seurat.object <- CreateSeuratObject(counts = sc.data, project = "scwat", meta.data = metadata)
+seurat.10x <- CreateSeuratObject(counts = sc.data, project = "scWAT10XG", meta.data = metadata)
+seurat.10x$orig.ident <- "10Xg"
+
+sc.data <- ReadMtx(mtx = paste0(path_to_data, "DropSeq_raw/HsDrop.counts.mtx.gz"), 
+                   cells = paste0(path_to_data, "DropSeq_raw/HsDrop.counts.barcodes.tsv.gz"), 
+                   features = paste0(path_to_data, "DropSeq_raw/HsDrop.counts.features.tsv.gz"))
+metadata <- read.csv(file = paste0(path_to_data, "Hs.metadata.tsv"), header = TRUE, sep = "\t", row.names = 1)
+seurat.drop <- CreateSeuratObject(counts = sc.data, project = "scWATdropseq", meta.data = metadata)
+seurat.drop$orig.ident <- "drop"
+
+seurat.object <- merge(seurat.10x, y = seurat.drop, add.cell.ids = c("10Xg", "Drop"), project = "scWAT")
 
 
 # QC ----------------------------------------------------------------------
@@ -138,7 +153,7 @@ if(do.sctransform == FALSE){ # standard method
 }else {
   print("Must set do.sctransform to one of: FALSE, each, pooled")
 }
-stopCluster(cl)
+
 remove(object.list)
 saveRDS(seurat.object, file = paste0(rna.dir, "/", rnaProject, ".RDS"))
 
