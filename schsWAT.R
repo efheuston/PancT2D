@@ -15,11 +15,12 @@ rnaProject <- "schsWAT"
 regression.vars <- c("mitochondrial_percent", "ribosomal_protein_percent", "cell_cycle__phase")
 cum.var.thresh <- 95
 resolution <- 0.5
-comp.type <- "mac" # one of macbookPro, biowulf
+comp.type <- "biowulf" # one of macbookPro, biowulf
 do.sctransform <- "each" # one of FALSE, each, pooled
 
 ## infrequently modified
 do.doubletFinder <- TRUE
+doubletFinder.splitObject <- "biosample_id"
 run.jackstraw <- FALSE
 min.cells <- 3
 min.features <- 200
@@ -82,15 +83,18 @@ seurat.drop <- CreateSeuratObject(counts = sc.data, project = "scWATdropseq", me
 seurat.drop$orig.ident <- "drop"
 
 seurat.object <- merge(seurat.10x, y = seurat.drop, add.cell.ids = c("10Xg", "Drop"), project = "scWAT")
-
+remove(seurat.10x)
+remove(seurat.drop)
+remove(sc.data)
+remove(metadata)
 
 # QC ----------------------------------------------------------------------
 
 ##plot qc stats
-VlnPlot(seurat.object, features = c("nFeature_RNA", "nCount_RNA", "cell_cycle__phase"), ncol = 3, pt.size = 0)
-plot1<- FeatureScatter(seurat.object, feature1 = "nCount_RNA", feature2 = "cell_cycle__phase")
-plot2 <- FeatureScatter(seurat.object, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
-plot1 + plot2
+# VlnPlot(seurat.object, features = c("nFeature_RNA", "nCount_RNA", "cell_cycle__phase"), ncol = 3, pt.size = 0)
+# plot1<- FeatureScatter(seurat.object, feature1 = "nCount_RNA", feature2 = "cell_cycle__phase")
+# plot2 <- FeatureScatter(seurat.object, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+# plot1 + plot2
 
 
 # Normalize and scale data ----------------------------------------------------------
@@ -118,8 +122,8 @@ if(do.sctransform == FALSE){ # standard method
   seurat.object <- ScaleData(seurat.object, features = all.genes, vars.to.regress = regression.vars)
   
 } else if(do.sctransform == "each"){
-  print("Performing SCTransform")
-  split.object <- SplitObject(seurat.object, split.by = "orig.ident")
+  print(paste0("Performing SCTransform; splitting object on ", doubletFinder.splitObject))
+  split.object <- SplitObject(seurat.object, split.by = doubletFinder.splitObject)
   
   object.list <- foreach(i=1:length(split.object), .combine="c", .packages = c('Seurat', 'DoubletFinder', 'ggplot2', 'dplyr')) %dopar% {
     object.item <- SCTransform(split.object[[i]], assay = "RNA", return.only.var.genes = FALSE, vst.flavor = "v2")
@@ -156,10 +160,11 @@ if(do.sctransform == FALSE){ # standard method
 
 remove(object.list)
 saveRDS(seurat.object, file = paste0(rna.dir, "/", rnaProject, ".RDS"))
+save.image(file = paste0(rna.dir, "/", rnaProject, "-integrated.RData"))
 
 
 
-# Linear dimensional reduction --------------------------------------------
+	# Linear dimensional reduction --------------------------------------------
 
 
 seurat.object <- RunPCA(seurat.object, features = VariableFeatures(object = seurat.object))
