@@ -15,7 +15,7 @@ rnaProject <- "PancT2D_AAvsEUonly-doPar"
 regression.vars <- c("sequencerID", "SampleSex", "SampleAge")
 cum.var.thresh <- 90
 resolution <- 0.5
-comp.type <- "biowulf" # one of macbookPro, biowulf
+comp.type <- "macbookPro" # one of macbookPro, biowulf
 do.sctransform <- "each" # one of FALSE, each, pooled
 
 ## infrequently modified
@@ -31,9 +31,9 @@ excluded.samples <- c("HPAP-027_78239", "HPAP087_FGC2276", "HPAP-090_FGC2390", "
 # Directories -------------------------------------------------------------
 
 if(comp.type == "macbookPro"){
-  rna.dir <- "/Users/heustonef/Desktop/Obesity/scRNA/"
+  rna.dir <- "/Users/heustonef/Desktop/PancDB_Data/PancT2D/"
   path_to_data <- "/Users/heustonef/Desktop/PancDB_data/scRNA_noBams"
-  sourceable.functions <- list.files(path = "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepository/scMultiomics_MetaAnalysis/RFunctions", pattern = "*.R$", full.names = TRUE)
+  sourceable.functions <- list.files(path = "/Users/heustonef/Library/CloudStorage/OneDrive-NationalInstitutesofHealth/SingleCellMetaAnalysis/GitRepositories/RFunctions", pattern = "*.R$", full.names = TRUE)
   metadata.location <- "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/"
 } else if(comp.type == "biowulf"){
   rna.dir <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/"
@@ -316,10 +316,25 @@ saveRDS(seurat.object, file = paste0(rna.dir, "/", rnaProject, "-", as.character
 
 # Visualize after biowulf run ---------------------------------------------
 
-# seurat.object <- readRDS("Obesity_scRNA-SCTRegression-NW-OB.RDS")
+seurat.object <- readRDS("PancT2D_AAvsEUonly-doPar-SCTeach-95pctvar.RDS")
 colnames(seurat.object@meta.data)
 
-# cds <- readRDS("Obesity_scRNA-SCTRegression-NW-OB-monocle3CDS.RDS")
+table(seurat.object$SampleEthnicity)
+table(seurat.object$integrated_snn_res.0.5, seurat.object$SampleEthnicity)
+
+
+for(i in names(panc.markers)){
+  plot1 <- FeaturePlot(seurat.object, features = unlist(panc.markers[i]), ncol = 4, pt.size = 1)
+  png(filename = paste0(rnaProject, "_", i, ".png"), height = 800, width = 1600)
+  plot(plot1)
+  dev.off()
+}
+
+
+
+
+
+
 
 # Differential abundance testing ------------------------------------------
 library(speckle)
@@ -340,6 +355,9 @@ plotCellTypeProps(clusters=seurat.object$Obesity, sample=seurat.object$SCT_snn_r
 
 
 # Trajectory analysis -----------------------------------------------------
+
+#https://ucdavis-bioinformatics-training.github.io/2021-August-Advanced-Topics-in-Single-Cell-RNA-Seq-Trajectory-and-Velocity/data_analysis/monocle_fixed
+
 
 library(SeuratWrappers)
 library(monocle3)
@@ -387,5 +405,12 @@ get_earliest_principal_node <- function(cds){
   root_pr_nodes
 }
 cds <- order_cells(cds, root_pr_nodes=get_earliest_principal_node(cds))
+
+plot_cells(cds,
+           color_cells_by = "pseudotime",
+           label_cell_groups=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE,
+           graph_label_size=1.5)
 saveRDS(cds, file = paste0(rnaProject, "-monocle3CDS-90pctvar.RDS"))
 

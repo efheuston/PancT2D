@@ -35,8 +35,8 @@ fc.cutoff <- 3
 if(grepl("mac", comp.type, ignore.case = TRUE)){
   atac.dir <- "/Users/heustonef/Desktop/PancDB_Data/PancT2D/"
   path_to_data <- "/Users/heustonef/Desktop/PancDB_data/TestFiles"
-  sourceable.functions <- list.files(path = "/Users/heustonef/OneDrive/SingleCellMetaAnalysis/GitRepositories/RFunctions", pattern = "*.R$", full.names = TRUE)
-  metadata.location <- "/Users/heustonef/OneDrive/SingleCellMetaAnalysis/"
+  sourceable.functions <- list.files(path = "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepositories/RFunctions/", pattern = "*.R$", full.names = TRUE)
+  metadata.location <- "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/"
 } else if(grepl("biowulf", comp.type, ignore.case = TRUE)){
   atac.dir <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/"
   path_to_data <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/scRNA_transfer"
