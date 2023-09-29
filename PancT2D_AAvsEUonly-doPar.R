@@ -33,8 +33,8 @@ excluded.samples <- c("HPAP-027_78239", "HPAP087_FGC2276", "HPAP-090_FGC2390", "
 if(comp.type == "macbookPro"){
   rna.dir <- "/Users/heustonef/Desktop/PancDB_Data/PancT2D/"
   # path_to_data <- "/Users/heustonef/Desktop/PancDB_data/scRNA_noBams"
-  sourceable.functions <- list.files(path = "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepositories/RFunctions/", pattern = "*.R$", full.names = TRUE)
-  metadata.location <- "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/"
+  sourceable.functions <- list.files(path = "/Users/heustonef/OneDrive/SingleCellMetaAnalysis/GitRepositories/RFunctions/", pattern = "*.R$", full.names = TRUE)
+  metadata.location <- "/Users/heustonef/OneDrive/SingleCellMetaAnalysis/"
 } else if(comp.type == "biowulf"){
   rna.dir <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/"
   path_to_data <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/scRNA_transfer"
@@ -49,8 +49,8 @@ library(Seurat)
 library(patchwork)
 library(cowplot)
 library(foreach)
-library(doParallel)
-cl <- makeCluster(future::availableCores(), outfile = "")
+# library(doParallel)
+# cl <- makeCluster(future::availableCores(), outfile = "")
 
 ##load local functions
 invisible(sapply(sourceable.functions, source))
@@ -323,6 +323,28 @@ saveRDS(seurat.object, file = paste0(rna.dir, "/", rnaProject, "-", as.character
 # seurat.object <- readRDS("Obesity_scRNA-SCTRegression-NW-OB.RDS")
 colnames(seurat.object@meta.data)
 
+
+# Calc percent_ribo
+seurat.object <- PercentageFeatureSet(seurat.object, "^RP[SL]", col.name = "percent_ribo")
+# Percentage hemoglobin genes - includes all genes starting with HB except HBP.
+seurat.object <- PercentageFeatureSet(seurat.object, "^HB[^(P)]", col.name = "percent_hb")
+
+seurat.object <- PercentageFeatureSet(seurat.object, "PECAM1|PF4", col.name = "percent_plat")
+feats <- c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent_ribo", "percent_hb", "percent_plat")
+
+
+VlnPlot(seurat.object, group.by = "integrated_snn_res.0.5", features = feats, pt.size = 0, ncol = 3, cols = color.palette) +
+  NoLegend()
+
+
+FeaturePlot(seurat.object, features = c("PDX1", "NKX6-1", "SOX2", "POU5F1", "CD34", "CD3G", "CD19", "CD14"))
+
+
+
+
+
+
+
 # cds <- readRDS("Obesity_scRNA-SCTRegression-NW-OB-monocle3CDS.RDS")
 
 # Differential abundance testing ------------------------------------------
@@ -339,6 +361,60 @@ propeller(clusters = Idents(seurat.object), sample = seurat.object$DonorID, grou
 
 # Plot cell type proportions
 plotCellTypeProps(clusters=seurat.object$Obesity, sample=seurat.object$SCT_snn_res.0.5)
+
+
+
+# Differential abundance testing ------------------------------------------
+
+#https://bioconductor.org/books/3.13/OSCA.multisample/differential-abundance.html
+library(edgeR)
+
+seurat.object <- readRDS("PancT2D_AAvsEUonly-doPar-SCTeach-95pctvar.RDS")
+# For me:
+
+# 
+# tomato = Ethnicity
+# celltype.mapped = integrated_snn_res.0.5
+# sample = DonorID?
+# pool = orig.ident?
+
+
+
+
+# Step1: quantify the number of cells in each cluster:
+
+sce <- as.SingleCellExperiment(seurat.object)
+
+abundances <- table(sce$integrated_snn_res.0.5, sce$DonorID)
+abundances <- unclass(abundances)
+head(abundances)
+
+extra.info <- colData(sce)[match(colnames(abundances), sce$DonorID),]
+y.ab <- DGEList(abundances, samples=extra.info)
+y.ab  
+  
+keep <- filterByExpr(y.ab, group=y.ab$samples$SampleEthnicity)
+y.ab <- y.ab[keep,]
+summary(keep)
+
+design <- model.matrix(~factor(SampleEthnicity), y.ab$samples)
+design
+
+y.ab <- estimateDisp(y.ab, design, trend="none")
+summary(y.ab$common.dispersion)
+plotBCV(y.ab, cex=1)
+fit.ab <- glmQLFit(y.ab, design, robust=TRUE, abundance.trend=FALSE)
+summary(fit.ab$var.prior)
+summary(fit.ab$df.prior)
+plotQLDisp(fit.ab, cex=1)
+res <- glmQLFTest(fit.ab, coef=ncol(design))
+summary(decideTests(res))
+topTags(res)
+
+# Want to know if ethnicity alters abundances between populations
+# In this case, we are aiming to identify clusters that change in abundance among the compartment of injected cells compared to the background.
+
+
 
 
 

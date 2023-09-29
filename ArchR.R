@@ -40,9 +40,9 @@ library(harmony)
 # library(foreach)
 # library(doParallel)
 # cl <- makeCluster(future::availableCores(), outfile = "")
-nThreads <- future::availableCores()
+# nThreads <- future::availableCores()
 addArchRGenome("hg38")
-addArchRThreads(threads = nThreads)
+# addArchRThreads(threads = nThreads)
 
 
 # Load data ---------------------------------------------------------------
@@ -259,7 +259,7 @@ markerList$C1
 
 # Calling peaks -----------------------------------------------------------
 arch.proj <- loadArchRProject(working.dir)
-library(BSgenome.Hsapiens.UCSC.hg38)
+library(BSgenome.Hsanopiens.UCSC.hg38)
 pathToMacs2 <- findMacs2()
 BSgenome.Hsapiens.UCSC.hg18 <- BSgenome.Hsapiens.UCSC.hg38::BSgenome.Hsapiens.UCSC.hg38
 
