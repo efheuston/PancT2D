@@ -10,7 +10,7 @@
 # Global parameters -------------------------------------------------------
 
 ## frequently modified
-atacProject <- "Test_snATACSeq-Signac"
+atacProject <- "snATACSeq-Signac"
 working.dir <- "./"
 records.dir <- "~/OneDrive/SingleCellMetaAnalysis/GitRepositories/PancT2D/"
 res <- 0.5
@@ -34,9 +34,9 @@ fc.cutoff <- 3
 
 if(grepl("mac", comp.type, ignore.case = TRUE)){
   atac.dir <- "/Users/heustonef/Desktop/PancDB_Data/PancT2D/"
-  path_to_data <- "/Users/heustonef/Desktop/PancDB_data/TestFiles"
-  sourceable.functions <- list.files(path = "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/GitRepositories/RFunctions/", pattern = "*.R$", full.names = TRUE)
-  metadata.location <- "/Users/heustonef/OneDrive-NIH/SingleCellMetaAnalysis/"
+  path_to_data <- "/Users/heustonef/Desktop/PancDB_data/snATAC_transfer/"
+  sourceable.functions <- list.files(path = "/Users/heustonef/OneDrive/SingleCellMetaAnalysis/GitRepositories/RFunctions/", pattern = "*.R$", full.names = TRUE)
+  metadata.location <- "/Users/heustonef/OneDrive/SingleCellMetaAnalysis/"
 } else if(grepl("biowulf", comp.type, ignore.case = TRUE)){
   atac.dir <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/"
   path_to_data <- "/data/CRGGH/heustonef/hpapdata/cellranger_scRNA/scRNA_transfer"
@@ -81,13 +81,13 @@ sc.data <- sc.data[grepl(pattern = "^HPAP", sc.data)]
 metadata <- read.table(file = paste0(metadata.location, "HPAPMetaData.txt"), header = TRUE, sep = "\t", row.names = 1)
 
 #Exclude for testing
-# metadata <- metadata %>%
-#   filter(grepl("Af|Cauc|Black", SampleEthnicity) &
-#            # filter(grepl("Af", SampleEthnicity) & 
-#            SimpDisease != "T1DM" & 
-#            SimpDisease != "NoDM" &
-#            !grepl("Fluidigm", scRNA_Platform) & 
-#            scATAC > 0)
+metadata <- metadata %>%
+  filter(grepl("Af|Cauc|Black", SampleEthnicity) &
+           # filter(grepl("Af", SampleEthnicity) &
+           SimpDisease != "T1DM" &
+           SimpDisease != "NoDM" &
+           !grepl("Fluidigm", scRNA_Platform) &
+           scATAC > 0)
 
 
 # Exclude samples that failed CellRanger QC

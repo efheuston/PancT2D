@@ -48,7 +48,7 @@ library(dplyr)
 library(Seurat)
 library(patchwork)
 library(cowplot)
-library(foreach)
+# library(foreach)
 # library(doParallel)
 # cl <- makeCluster(future::availableCores(), outfile = "")
 
@@ -256,9 +256,59 @@ saveRDS(seurat.object, file = paste0(rna.dir, "/", rnaProject, "-", as.character
 
 ##umap
 DimPlot(seurat.object, reduction = "umap", cols = color.palette, label = T, label.size = 7, repel = T)
+
 DimPlot(seurat.object, reduction = "umap", group.by = "SampleEthnicity", cols = color.palette, label = T, label.size = 7, repel = T)
+DimPlot(seurat.object, reduction = "umap", group.by = "SampleEthnicity", cols = color.palette, label = F, label.size = 7, repel = T, split.by = "integrated_snn_res.0.5", ncol = 6)
 DimPlot(seurat.object, reduction = "umap", group.by = "orig.ident", cols = color.palette, label = T, label.size = 7, repel = T)
 DimPlot(seurat.object, reduction = "umap", group.by = "DonorID", cols = color.palette, label = T, label.size = 7, repel = T)
+
+ethn.per.cluster <- as.data.frame.matrix(table(seurat.object$integrated_snn_res.0.5, seurat.object$SampleEthnicity))
+ethn.per.cluster <- round((ethn.per.cluster/rowSums(ethn.per.cluster)),2)
+ethn.per.cluster
+head(seurat.object@meta.data)
+seurat.object@meta.data$cluster.pct.AF <- seurat.object@meta.data$integrated_snn_res.0.5
+seurat.object@meta.data$cluster.pct.EU <- seurat.object@meta.data$integrated_snn_res.0.5
+# seurat.object@meta.data <- select(seurat.object@meta.data,-c("cluster.pct.AF", "cluster.pct.EU"))
+# 
+
+temp <- seurat.object@meta.data
+head(temp)
+conditions_df <- data.frame(
+  Condition = rownames(ethn.per.cluster),  # Conditions to check
+  Replacement.AF = ethn.per.cluster[,"African american/Black"],  # Corresponding replacements
+  Replacement.EU = ethn.per.cluster[,"Caucasian"]  # Corresponding replacements
+)
+# conditions_df$Condition <- as.numeric(conditions_df$Condition)
+conditions_df$Replacement.AF <- as.character(conditions_df$Replacement.AF)
+conditions_df$Replacement.EU <- as.character(conditions_df$Replacement.EU)
+
+temp <- temp %>%
+  mutate_at(vars(cluster.pct.AF),
+            funs(case_when(
+              . %in% conditions_df$Condition ~ conditions_df$Replacement.AF[match(., conditions_df$Condition)],
+              TRUE ~ .
+            ))
+  )
+
+temp <- temp %>%
+  mutate_at(vars(cluster.pct.EU),
+            funs(case_when(
+              . %in% conditions_df$Condition ~ conditions_df$Replacement.EU[match(., conditions_df$Condition)],
+              TRUE ~ .
+            ))
+  )
+temp$cluster.pct.AF<- as.numeric(temp$cluster.pct.AF)
+temp$cluster.pct.EU<- as.numeric(temp$cluster.pct.EU)
+seurat.object@meta.data <- temp
+head(seurat.object@meta.data)
+# FeaturePlot(seurat.object, features = c("cluster.pct.AF", "cluster.pct.EU"), blend = TRUE)
+
+
+
+FeaturePlot(seurat.object, features = "cluster.pct.AF", cols = c("red", "blue"))
+
+
+
 
 
 FeaturePlot(seurat.object, reduction = "umap", features = "BMI")
@@ -320,7 +370,6 @@ saveRDS(seurat.object, file = paste0(rna.dir, "/", rnaProject, "-", as.character
 
 # Visualize after biowulf run ---------------------------------------------
 
-# seurat.object <- readRDS("Obesity_scRNA-SCTRegression-NW-OB.RDS")
 colnames(seurat.object@meta.data)
 
 
@@ -330,14 +379,373 @@ seurat.object <- PercentageFeatureSet(seurat.object, "^RP[SL]", col.name = "perc
 seurat.object <- PercentageFeatureSet(seurat.object, "^HB[^(P)]", col.name = "percent_hb")
 
 seurat.object <- PercentageFeatureSet(seurat.object, "PECAM1|PF4", col.name = "percent_plat")
+
+
 feats <- c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent_ribo", "percent_hb", "percent_plat")
-
-
 VlnPlot(seurat.object, group.by = "integrated_snn_res.0.5", features = feats, pt.size = 0, ncol = 3, cols = color.palette) +
   NoLegend()
 
 
 FeaturePlot(seurat.object, features = c("PDX1", "NKX6-1", "SOX2", "POU5F1", "CD34", "CD3G", "CD19", "CD14"))
+
+
+# subset for presentation -------------------------------------------------
+seurat.object <- readRDS("/Users/heustonef/Desktop/PancDB_Data/PancT2D_scRNA/PancT2D_AAvsEUonly-doPar-SCTeach-95pctvar.RDS")
+seurat.subset <- subset(seurat.object, idents = c("1", "15"), invert = TRUE)
+levels(seurat.subset)
+cluster.ids.subset <- c(
+  "Exocrine1", #SCT0
+  "Alpha2", #SCT2
+  "Exocrine2", #SCT3--REG1A
+  "Beta1", #SCT4
+  "Epithelial", #SCT5--KRT18
+  "Endothelial", #SCT6
+  "Alpha3", #SCT7
+  "Beta2", #SCT8
+  "Immune1", #SCT9--IGFBP7
+  "Alpha4", #SCT10
+  "Immune3", #SCT11--IGFBP7/NEAT1
+  "Alpha1", #SCT12
+  "Immune4", #SCT13--NEAT1
+  "Mast Cells", #SCT14--TPSB2
+  "Macrophages", #SCT16
+  "Immune2" #SCT17
+)
+names(cluster.ids.subset) <- levels(seurat.subset)
+seurat.subset <- RenameIdents(seurat.subset, cluster.ids.subset)
+seurat.subset$cell.ids <- seurat.subset@active.ident
+
+feats <- c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent_ribo", "percent_hb", "percent_plat")
+VlnPlot(subset(seurat.subset, idents = c("Beta1", "Beta2")), group.by = "integrated_snn_res.0.5", features = feats, pt.size = 0, ncol = 3, cols = color.palette) +
+  NoLegend()
+
+# features.dotplot <- c("PNLIP", "PPY", "GCG", "REG1A", "INS", "KRT18", "PECAM1", "TTR", "IGFBP7", "C11orf96", "NEAT1", "TPSB2", "SST", "APOE", "CDH19")
+features.dotplot <- c(
+  "TTR", 
+  "GCG", #alpha
+  "INS", #beta
+  "KRT18", #acinar/epithilial
+  "TPSB2",
+  "MALAT1",
+  "NEAT1",
+  "IGFBP7",
+  "C11orf96", 
+  "CDH19",
+  "APOE",
+  "PECAM1", 
+  "REG1A", 
+  "PNLIP")
+DotPlot(seurat.subset, features = features.dotplot, cluster.idents = TRUE, col.min = 0.01, dot.min = .51, dot.scale = 12)
+
+png(filename = "features-dotMarkers.png", width=1000, height=800, bg = "transparent")
+DotPlot(seurat.subset, features = features.dotplot, cluster.idents = TRUE, col.min = 0.01, dot.min = .51, dot.scale = 12)
+dev.off()
+
+classic.dotplot <- c(
+  "GCG", #alpha
+  "INS", #beta
+  "PPY", #gamma
+  "SST", #delta
+  "AMY2A",
+  "KRT19",
+  "MAFB",
+  # "CD4", 
+  # "CD8A", 
+  # "CD44",
+  "VWF",
+  "PECAM1", 
+  # "ITGAM", 
+  # "IL2RA",
+  "APOE") #myeloid
+
+clustermap <- DotPlot(seurat.subset, features = classic.dotplot, cluster.idents = TRUE, col.min = 0.01) & 
+  theme(legend.background = element_rect(fill = "transparent"),
+        legend.box.background = element_rect(fill = "transparent"),
+        panel.background = element_rect(fill = "transparent"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_rect(fill = "transparent",
+                                       color = NA))
+plot(clustermap)
+ggsave("clusters-dotMarkers.png", plot= clustermap, width=10, height=10, dpi=300, bg = "transparent")
+
+
+DotPlot(seurat.subset, features = features.dotplot, cluster.idents = TRUE, col.min = 0.01, cols = c("gray94", "blue2"))
+png(filename = "dotplot.png", height = 800, width = 800, bg = "transparent")
+DotPlot(seurat.subset, features = features.dotplot, cluster.idents = TRUE, col.min = 0.01, cols = c("gray94", "blue2"))
+dev.off()
+
+DimPlot(seurat.subset, group.by = "integrated_snn_res.0.5", cols = color.palette, shuffle = TRUE, label = FALSE, label.size = 5) + NoLegend()
+
+DimPlot(seurat.subset, group.by = "integrated_snn_res.0.5", shuffle = T, cols = color.palette, pt.size = 3, label = T)
+
+png(filename = "seurat-clusteredByident.png", height = 1200, width = 1200, bg = "transparent")
+DimPlot(seurat.subset, group.by = "integrated_snn_res.0.5", cols = color.palette, shuffle = TRUE, label = FALSE, label.size = 5) + NoLegend() &
+  theme(legend.background = element_rect(fill = "transparent"),
+        legend.box.background = element_rect(fill = "transparent"),
+        panel.background = element_rect(fill = "transparent"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_rect(fill = "transparent",
+                                       color = NA))
+dev.off()
+png(filename = "seurat-clusteredByethnicity.png", height = 1200, width = 1200, bg = "transparent")
+DimPlot(seurat.subset, group.by = "SampleEthnicity", cols = color.palette, shuffle = TRUE, label = FALSE, label.size = 5) + NoLegend() &
+  theme(legend.background = element_rect(fill = "transparent"),
+        legend.box.background = element_rect(fill = "transparent"),
+        panel.background = element_rect(fill = "transparent"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_rect(fill = "transparent",
+                                       color = NA))
+dev.off()
+
+
+
+DimPlot(subset(seurat.subset, idents = c("Exocrine1", "Exocrine2", "Beta1")), group.by = "SampleEthnicity", split.by = "cell.ids", ncol = 2, shuffle = T, cols = color.palette, alpha = 0.4)
+# png(filename = "clusters-ethnicity.png", height = 800, width = 800, bg = "transparent")
+clustermap <- DimPlot(subset(seurat.subset, idents = c("Exocrine1", "Exocrine2", "Beta1")), group.by = "SampleEthnicity", split.by = "cell.ids", ncol = 2, shuffle = T, cols = color.palette, alpha = 0.4) & 
+  theme(legend.background = element_rect(fill = "transparent"),
+                   legend.box.background = element_rect(fill = "transparent"),
+                   panel.background = element_rect(fill = "transparent"),
+                   panel.grid.major = element_blank(),
+                   panel.grid.minor = element_blank(),
+                   plot.background = element_rect(fill = "transparent",
+                                                  color = NA))
+ggsave("clusters-ethnicity.png", plot= clustermap, width=10, height=10, dpi=300, bg = "transparent")
+
+
+FeaturePlot(seurat.subset, features = features.dotplot, ncol = 4)
+
+
+abstract.dotplot <- c("PNLIP", "PRSS1", "REG1A", "REG1B", "SPINK1")
+abstract.plot <- FeaturePlot(seurat.subset, features = abstract.dotplot, ncol = 2) & 
+  theme(legend.background = element_rect(fill = "transparent"),
+        legend.box.background = element_rect(fill = "transparent"),
+        panel.background = element_rect(fill = "transparent"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_rect(fill = "transparent",
+                                       color = NA))
+ggsave("Abstract-featureMarkers.png", plot= abstract.plot, width=10, height=10, dpi=300, bg = "transparent")
+
+
+VlnPlot(seurat.subset, features = c("IAPP", "PPP1R1A", "PLCG2"), cols = color.palette, idents = c("Beta1", "Beta2"))
+VlnPlot(seurat.subset, features = "percent.mt", cols = color.palette, idents = c("Beta1", "Beta2"))
+VlnPlot(seurat.subset, features = "G2M.Score", cols = color.palette, idents = c("Beta1", "Beta2"))
+
+VlnPlot(subset(seurat.subset, idents = c("Exocrine1", "Exocrine2")), features = c("HNF4A", "HNF4G", "TCF7L2"), split.by = "SampleEthnicity", split.plot = TRUE)
+png(filename = "Beta1VBeta2-dotplot.png", height = 800, width = 1200)
+VlnPlot(subset(seurat.subset, idents = c("Beta1", "Beta2")), features = c("IAPP", "PPP1R1A", "percent.mt"), split.plot = FALSE)
+dev.off()
+# Subpopulation differences -----------------------------------------------
+levels(seurat.subset@active.ident)
+
+seurat.subset <- PrepSCTFindMarkers(seurat.subset, assay = "SCT")
+
+
+markers.exocrine <- FindMarkers(seurat.subset, ident.1 = "Exocrine1", ident.2 = "Exocrine2")
+markers.exocrine <- markers.exocrine %>%
+  arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
+saveRDS(markers.exocrine, file = paste0(rnaProject, "-Exocrine-markers.rds"))
+
+
+markers.beta <- FindMarkers(seurat.subset, ident.1 = "Beta1", ident.2 = "Beta2")
+markers.beta <- markers.beta %>%
+  arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
+saveRDS(markers.beta, file = paste0(rnaProject, "-Beta-markers.rds"))
+
+
+markers.immune1 <- FindMarkers(seurat.subset, ident.1 = "Immune1", ident.2 = c("Immune2", "Immune3", "Immune4"))
+markers.immune1 %>%
+  arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
+saveRDS(markers.immune1, file = paste0(rnaProject, "-Immune1-markers.rds"))
+
+markers.immune2 <- FindMarkers(seurat.subset, ident.1 = "Immune2", ident.2 = c("Immune1", "Immune3", "Immune4"))
+markers.immune2 %>%
+  arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
+saveRDS(markers.immune2, file = paste0(rnaProject, "-Immune2-markers.rds"))
+
+markers.immune3 <- FindMarkers(seurat.subset, ident.1 = "Immune3", ident.2 = c("Immune1", "Immune2", "Immune4"))
+markers.immune3 %>%
+  arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
+saveRDS(markers.immune3, file = paste0(rnaProject, "-Immune3-markers.rds"))
+
+markers.immune4 <- FindMarkers(seurat.subset, ident.1 = "Immune4", ident.2 = c("Immune1", "Immune3", "Immune2"))
+markers.immune4 %>%
+  arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
+saveRDS(markers.immune4, file = paste0(rnaProject, "-Immune4-markers.rds"))
+
+
+markers.Alpha1 <- FindMarkers(seurat.subset, ident.1 = "Alpha1", ident.2 = c("Alpha2", "Alpha3", "Alpha4"))
+markers.Alpha1 %>%
+  arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
+saveRDS(markers.Alpha1, file = paste0(rnaProject, "-Alpha1-markers.rds"))
+
+markers.Alpha2 <- FindMarkers(seurat.subset, ident.1 = "Alpha2", ident.2 = c("Alpha1", "Alpha3", "Alpha4"))
+markers.Alpha2 %>%
+  arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
+saveRDS(markers.Alpha2, file = paste0(rnaProject, "-Alpha2-markers.rds"))
+
+markers.Alpha3 <- FindMarkers(seurat.subset, ident.1 = "Alpha3", ident.2 = c("Alpha1", "Alpha2", "Alpha4"))
+markers.Alpha3 %>%
+  arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
+saveRDS(markers.Alpha3, file = paste0(rnaProject, "-Alpha3-markers.rds"))
+
+markers.Alpha4 <- FindMarkers(seurat.subset, ident.1 = "Alpha4", ident.2 = c("Alpha1", "Alpha3", "Alpha2"))
+markers.Alpha4 %>%
+  arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
+saveRDS(markers.Alpha4, file = paste0(rnaProject, "-Alpha4-markers.rds"))
+
+
+
+
+##create workbook
+markers.table <- openxlsx::createWorkbook()
+
+
+##write positive markers to table
+openxlsx::addWorksheet(markers.table, sheetName = "Exocrine")
+openxlsx::writeData(markers.table, sheet = "Exocrine", x = markers.exocrine,startCol = 1, startRow = 1, colNames = TRUE, rowNames = TRUE)
+openxlsx::addWorksheet(markers.table, sheetName = "Beta")
+openxlsx::writeData(markers.table, sheet = "Beta", x = markers.beta, startCol = 1, startRow = 1, colNames = TRUE, rowNames = TRUE)
+
+openxlsx::addWorksheet(markers.table, sheetName = "Immune1")
+openxlsx::writeData(markers.table, sheet = "Immune1", x = markers.immune1, startCol = 1, startRow = 1, colNames = TRUE, rowNames = TRUE)
+openxlsx::addWorksheet(markers.table, sheetName = "Immune2")
+openxlsx::writeData(markers.table, sheet = "Immune2", x = markers.immune2, startCol = 1, startRow = 1, colNames = TRUE, rowNames = TRUE)
+openxlsx::addWorksheet(markers.table, sheetName = "Immune3")
+openxlsx::writeData(markers.table, sheet = "Immune3", x = markers.immune3, startCol = 1, startRow = 1, colNames = TRUE, rowNames = TRUE)
+openxlsx::addWorksheet(markers.table, sheetName = "Immune4")
+openxlsx::writeData(markers.table, sheet = "Immune4", x = markers.immune4, startCol = 1, startRow = 1, colNames = TRUE, rowNames = TRUE)
+
+
+openxlsx::addWorksheet(markers.table, sheetName = "Alpha1")
+openxlsx::writeData(markers.table, sheet = "Alpha1", x = markers.Alpha1, startCol = 1, startRow = 1, colNames = TRUE, rowNames = TRUE)
+openxlsx::addWorksheet(markers.table, sheetName = "Alpha2")
+openxlsx::writeData(markers.table, sheet = "Alpha2", x = markers.Alpha2, startCol = 1, startRow = 1, colNames = TRUE, rowNames = TRUE)
+openxlsx::addWorksheet(markers.table, sheetName = "Alpha3")
+openxlsx::writeData(markers.table, sheet = "Alpha3", x = markers.Alpha3, startCol = 1, startRow = 1, colNames = TRUE, rowNames = TRUE)
+openxlsx::addWorksheet(markers.table, sheetName = "Alpha4")
+openxlsx::writeData(markers.table, sheet = "Alpha4", x = markers.Alpha4, startCol = 1, startRow = 1, colNames = TRUE, rowNames = TRUE)
+
+
+##save workbook
+openxlsx::saveWorkbook(wb = markers.table, file = paste0(rnaProject, "_Pop_diff-Markers.xlsx"), overwrite = TRUE, returnValue = TRUE)
+
+
+
+# WebGestaltR -------------------------------------------------------------
+
+library(WebGestaltR)
+
+seurat.markers <- readRDS("/Users/heustonef/Desktop/PancDB_Data/PancT2D_scRNA/PancT2D_AAvsEUonly-doPar-SCTeach-allmarkers-95pctvar.rds")
+
+colnames(seurat.markers)
+seurat.markers<- seurat.markers %>%
+  select(-pct.1, -pct.2, -p_val) %>%
+  filter(!cluster %in% c(1, 15))
+seurat.markers$cluster <- factor(seurat.markers$cluster)
+seurat.markers.cluster0 <- seurat.markers %>%
+  filter(cluster == 0 & p_val_adj < 0.05) %>%
+  ungroup() %>%
+  select(-p_val_adj, -cluster) %>%
+  relocate(gene, avg_log2FC)
+seurat.markers.cluster0 <- data.frame(seurat.markers.cluster0)
+
+enrich.databases <- c(
+                      "pathway_KEGG",
+                      # "pathway_Reactome",
+                      # "pathway_Panther",
+                      # "pathway_Wikipathway",
+                      "geneontology_Biological_Process",
+                      # "geneontology_Cellular_Component_noRedundant",
+                      "geneontology_Molecular_Function_noRedundant",
+                      # "disease_OMIM",
+                      # "disease_Disgenet",
+                      # "drug_DrugBank",
+                      # "drug_GLAD4U",
+                      "disease_GLAD4U",
+                      "phenotype_Human_Phenotype_Ontology"
+                      )
+seurat.markers <- readRDS("~/Desktop/PancDB_Data/ASHG2023/PancT2D_AAvsEUonly-doPar-Beta-markers.rds")
+seurat.markers$gene <- rownames(seurat.markers)
+seurat.markers<- seurat.markers %>%
+  select(-pct.1, -pct.2, -p_val)
+seurat.markers.cluster0 <- seurat.markers %>%
+  filter(p_val_adj < 0.05) %>%
+  select(-p_val_adj) %>%
+  relocate(gene, avg_log2FC)
+seurat.markers.cluster0 <- data.frame(seurat.markers.cluster0)
+rownames(seurat.markers.cluster0) <- 1:nrow(seurat.markers.cluster0)
+
+enrichResult <- WebGestaltR(enrichMethod="GSEA", organism="hsapiens",
+                            enrichDatabase=enrich.databases, interestGene = seurat.markers.cluster0,
+                            interestGeneType="genesymbol", sigMethod="top", topThr=2000, minNum=10, fdrThr = 1,
+                            isOutput = TRUE, saveRawGseaResult = FALSE, projectName = "Beta1vsBeta2")
+# View(enrichResult)
+colnames(enrichResult)
+# enrichResult$negLog10FDR <- log10(enrichResult$FDR) * -1
+
+# Add a column to the data frame to specify if they are UP- or DOWN- regulated (log2fc respectively positive or negative)<br /><br /><br />
+# df$diffexpressed <- "NO"<br /><br /><br />
+#   # if log2Foldchange > 0.6 and pvalue < 0.05, set as "UP"<br /><br /><br />
+#   df$diffexpressed[df$log2fc > 0.6 & df$pval < 0.05] <- "UP"<br /><br /><br />
+#   # if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"<br /><br /><br />
+#   df$diffexpressed[df$log2fc < -0.6 & df$pval < 0.05] <- "DOWN"</p><br /><br />
+#   <p># Explore a bit<br /><br /><br />
+#   head(df[order(df$padj) & df$diffexpressed == 'DOWN', ])<br /><br /><br />
+#   
+library(ggrepel)
+# plot adding up all layers we have seen so far
+
+
+enrichResult$diffexpressed <- "NO"
+# if log2Foldchange > 0.6 and pvalue < 0.05, set as "UP"
+enrichResult$diffexpressed[enrichResult$normalizedEnrichmentScore > 2 & enrichResult$FDR < 0.05] <- "UP"
+# if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"
+enrichResult$diffexpressed[enrichResult$normalizedEnrichmentScore < -2 & enrichResult$FDR < 0.05] <- "DOWN"
+enrichResult$delabel <- NA
+enrichResult$delabel[enrichResult$diffexpressed != "NO"] <- enrichResult$description[enrichResult$diffexpressed != "NO"]
+
+
+mycolors <- c("blue", "red", "black")
+names(mycolors) <- c("DOWN", "UP", "NO")
+
+ggplot(data=enrichResult, aes(x=normalizedEnrichmentScore, y=-log10(FDR), col=diffexpressed, label=delabel)) +
+  geom_point() +
+  theme_minimal() +
+  geom_text_repel() +
+  scale_color_manual(values=mycolors) +
+  ylim(c(0, 200)) +
+  geom_vline(xintercept=c(-0.6, 0.6), col="red") +
+  geom_hline(yintercept=-log10(0.05), col="red")
+
+
+
+ggplot(data = enrichResult, aes(x = normalizedEnrichmentScore, y = negLog10FDR)) + 
+  geom_point() +
+  theme_minimal() +
+  geom_text()
+  
+
+
+# scale_color_manual(values = c("#00AFBB", "grey", "#FFDB6D"), # to set the colours of our variable<br /><br /><br />
+#                      labels = c("Downregulated", "Not significant", "Upregulated")) + # to set the labels in case we want to overwrite the categories from the dataframe (UP, DOWN, NO
+#   geom_point(size = 5)
+
+
+
+
+# Integrate ATAC ----------------------------------------------------------
+
+atacProject.coldata <- getCellColData(arch.proj)
+
+n_occur <- data.frame(table(atacProject.coldata$predictedCell_Un))
+n_occur[n_occur$Freq > 1,]
+atacProject.coldata[atacProject.coldata$id %in% n_occur$Var1[n_occur$Freq > 1],]
+
+
 
 
 
@@ -383,9 +791,9 @@ seurat.object <- readRDS("PancT2D_AAvsEUonly-doPar-SCTeach-95pctvar.RDS")
 
 # Step1: quantify the number of cells in each cluster:
 
-sce <- as.SingleCellExperiment(seurat.object)
+sce <- as.SingleCellExperiment(seurat.subset)
 
-abundances <- table(sce$integrated_snn_res.0.5, sce$DonorID)
+abundances <- table(sce$cell.ids, sce$DonorID)
 abundances <- unclass(abundances)
 head(abundances)
 
