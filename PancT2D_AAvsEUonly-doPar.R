@@ -31,7 +31,7 @@ excluded.samples <- c("HPAP-027_78239", "HPAP087_FGC2276", "HPAP-090_FGC2390", "
 # Directories -------------------------------------------------------------
 
 if(comp.type == "macbookPro"){
-  rna.dir <- "/Users/heustonef/Desktop/PancDB_Data/PancT2D/"
+  rna.dir <- "/Users/heustonef/Desktop/PancDB_Data/ASHG2023/"
   # path_to_data <- "/Users/heustonef/Desktop/PancDB_data/scRNA_noBams"
   sourceable.functions <- list.files(path = "/Users/heustonef/OneDrive/SingleCellMetaAnalysis/GitRepositories/RFunctions/", pattern = "*.R$", full.names = TRUE)
   metadata.location <- "/Users/heustonef/OneDrive/SingleCellMetaAnalysis/"
@@ -538,7 +538,8 @@ VlnPlot(subset(seurat.subset, idents = c("Exocrine1", "Exocrine2")), features = 
 png(filename = "Beta1VBeta2-dotplot.png", height = 800, width = 1200)
 VlnPlot(subset(seurat.subset, idents = c("Beta1", "Beta2")), features = c("IAPP", "PPP1R1A", "percent.mt"), split.plot = FALSE)
 dev.off()
-# Subpopulation differences -----------------------------------------------
+
+# Define Subpopulation differences -----------------------------------------------
 levels(seurat.subset@active.ident)
 
 seurat.subset <- PrepSCTFindMarkers(seurat.subset, assay = "SCT")
@@ -635,9 +636,120 @@ openxlsx::saveWorkbook(wb = markers.table, file = paste0(rnaProject, "_Pop_diff-
 
 
 
+# Explore Beta1 vs Beta2 --------------------------------------------------
+
+markers.beta <- readRDS(paste0(rnaProject, "-Beta-markers.rds"))
+head(markers.beta)
+
+beta.subset <- subset(seurat.subset, idents = c("Beta1", "Beta2"))
+DimPlot(beta.subset)
+VlnPlot(beta.subset, features = c("GCK", "HK1", "SLC2A2", "CD9", "ST8SIA1"))
+
+
+# Downsampling ------------------------------------------------------------
+
+seurat.object <- readRDS("/Users/heustonef/Desktop/PancDB_Data/PancT2D_scRNA/PancT2D_AAvsEUonly-doPar-SCTeach-95pctvar.RDS")
+seurat.subset <- subset(seurat.object, idents = c("1", "15"), invert = TRUE)
+levels(seurat.subset)
+cluster.ids.subset <- c(
+  "Exocrine1", #SCT0
+  "Alpha2", #SCT2
+  "Exocrine2", #SCT3--REG1A
+  "Beta1", #SCT4
+  "Epithelial", #SCT5--KRT18
+  "Endothelial", #SCT6
+  "Alpha3", #SCT7
+  "Beta2", #SCT8
+  "Immune1", #SCT9--IGFBP7
+  "Alpha4", #SCT10
+  "Immune3", #SCT11--IGFBP7/NEAT1
+  "Alpha1", #SCT12
+  "Immune4", #SCT13--NEAT1
+  "Mast Cells", #SCT14--TPSB2
+  "Macrophages", #SCT16
+  "Immune2" #SCT17
+)
+names(cluster.ids.subset) <- levels(seurat.subset)
+seurat.subset <- RenameIdents(seurat.subset, cluster.ids.subset)
+seurat.subset$cell.ids <- seurat.subset@active.ident
+seurat.subset$cell.ids <- factor(seurat.subset$cell.ids)
+
+DimPlot(seurat.subset)
+ea.subset <- subset(seurat.subset, subset = SampleEthnicity == "Caucasian")
+Idents(ea.subset) <- "SampleEthnicity" # subset downsampling works per ident group
+aa.subset <- subset(seurat.subset, subset = SampleEthnicity == "African american/Black")
+Idents(aa.subset) <- "SampleEthnicity"
+
+ea.downsampled <- subset(x = ea.subset, downsample = ncol(aa.subset))
+# downsample.df <- data.frame(matrix(ncol=length(unique(ea.subset$cell.ids)),nrow=0, dimnames=list(NULL, unique(ea.subset$cell.ids))))
+
+
+# iterate.downsampling <- function(object.seurat, downsample.size = 100, n.iterations=5, metadata.col = "cell.ids", class.ident = NULL){
+#   if(is.null(metadata.col)){
+#     print("Please specify metadata.column for dataframe")
+#   }
+#   if(!is.null(class.ident)){
+#     print("This feature hasn't been finished yet. Using active.ident for downsampling.")
+#   }
+#   metadata.levels <- levels(object.seurat@meta.data[,metadata.col])
+#   downsample.df <- data.frame(matrix(ncol=length(metadata.levels),nrow=0))
+#   colnames(downsample.df) <- metadata.levels
+#   for(i in 1:n.iterations){
+#     # print(i)
+#     downsampled.object <- subset(object.seurat, downsample = downsample.size)
+#     for(cell.id in metadata.levels){
+#       # print(cell.id)
+#       downsample.df[i, cell.id] <- nrow(subset(x = downsampled.object, subset = cell.ids == cell.id))
+#     }
+#     print(head(downsample.df))
+#   } 
+#   return(downsample.df)
+# }
+# 
+# iterate.downsampling(object.seurat = ea.subset, n.iterations = 5, metadata.col = "cell.ids")
+# 
+# levels (downsampled.object@meta.data[,metadata.col])
+
+
+metadata.levels <- levels(ea.subset$cell.ids)
+downsample.df <- data.frame(matrix(ncol=length(metadata.levels),nrow=0))
+colnames(downsample.df) <- metadata.levels
+downsample.df
+n.iterations <- 100
+sample_size <- ncol(aa.subset)
+
+for(i in 1:n.iterations){
+  ea.downsampled <- ea.subset[, sample(Cells(ea.subset), ncol(aa.subset)), seed = NULL]
+  metadata.df <- ea.downsampled@meta.data
+  for(cell.type in metadata.levels){
+    n.cells <- nrow(metadata.df[metadata.df$cell.ids == cell.type,])
+    downsample.df[i, cell.type] <- n.cells
+  }
+}
+downsample.df
+
+library(tidyr)
+downsample.stats <- downsample.df %>%
+  summarise(across(where(is.numeric), .fns = list(avg = mean, sd = sd), .names = "{.fn}_{.col}")) |> 
+  pivot_longer(everything(), names_to = c(".value", "name"), names_sep = "_") |> 
+  mutate(name = gsub("\\.", '_', tolower(name)))
+
+ggplot(downsample.stats, aes(name, avg)) +
+  geom_col() +
+  geom_pointrange(aes(ymin = avg - sd, ymax = avg + sd))
+
+
+# Evaluate cluster stability - scclusteval --------------------------------
+
+library(scclusteval)
+
+
+
 # WebGestaltR -------------------------------------------------------------
 
 library(WebGestaltR)
+library(ggplot2)
+library(ggrepel)
 
 seurat.markers <- readRDS("/Users/heustonef/Desktop/PancDB_Data/PancT2D_scRNA/PancT2D_AAvsEUonly-doPar-SCTeach-allmarkers-95pctvar.rds")
 
@@ -653,21 +765,8 @@ seurat.markers.cluster0 <- seurat.markers %>%
   relocate(gene, avg_log2FC)
 seurat.markers.cluster0 <- data.frame(seurat.markers.cluster0)
 
-enrich.databases <- c(
-                      "pathway_KEGG",
-                      # "pathway_Reactome",
-                      # "pathway_Panther",
-                      # "pathway_Wikipathway",
-                      "geneontology_Biological_Process",
-                      # "geneontology_Cellular_Component_noRedundant",
-                      "geneontology_Molecular_Function_noRedundant",
-                      # "disease_OMIM",
-                      # "disease_Disgenet",
-                      # "drug_DrugBank",
-                      # "drug_GLAD4U",
-                      "disease_GLAD4U",
-                      "phenotype_Human_Phenotype_Ontology"
-                      )
+# Web Gestalt Beta Markers --------------------------------------------
+
 seurat.markers <- readRDS("~/Desktop/PancDB_Data/ASHG2023/PancT2D_AAvsEUonly-doPar-Beta-markers.rds")
 seurat.markers$gene <- rownames(seurat.markers)
 seurat.markers<- seurat.markers %>%
@@ -679,60 +778,149 @@ seurat.markers.cluster0 <- seurat.markers %>%
 seurat.markers.cluster0 <- data.frame(seurat.markers.cluster0)
 rownames(seurat.markers.cluster0) <- 1:nrow(seurat.markers.cluster0)
 
+enrich.databases <- c(
+                      "pathway_KEGG",
+                      # "pathway_Reactome",
+                      # "pathway_Panther",
+                      # "pathway_Wikipathway",
+                      # "geneontology_Biological_Process",
+                      # "geneontology_Cellular_Component_noRedundant",
+                      "geneontology_Molecular_Function_noRedundant",
+                      # "disease_OMIM",
+                      # "disease_Disgenet",
+                      # "drug_DrugBank",
+                      # "drug_GLAD4U"
+                      "disease_GLAD4U",
+                      "phenotype_Human_Phenotype_Ontology"
+                      )
+
 enrichResult <- WebGestaltR(enrichMethod="GSEA", organism="hsapiens",
                             enrichDatabase=enrich.databases, interestGene = seurat.markers.cluster0,
                             interestGeneType="genesymbol", sigMethod="top", topThr=2000, minNum=10, fdrThr = 1,
-                            isOutput = TRUE, saveRawGseaResult = FALSE, projectName = "Beta1vsBeta2")
-# View(enrichResult)
-colnames(enrichResult)
-# enrichResult$negLog10FDR <- log10(enrichResult$FDR) * -1
-
-# Add a column to the data frame to specify if they are UP- or DOWN- regulated (log2fc respectively positive or negative)<br /><br /><br />
-# df$diffexpressed <- "NO"<br /><br /><br />
-#   # if log2Foldchange > 0.6 and pvalue < 0.05, set as "UP"<br /><br /><br />
-#   df$diffexpressed[df$log2fc > 0.6 & df$pval < 0.05] <- "UP"<br /><br /><br />
-#   # if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"<br /><br /><br />
-#   df$diffexpressed[df$log2fc < -0.6 & df$pval < 0.05] <- "DOWN"</p><br /><br />
-#   <p># Explore a bit<br /><br /><br />
-#   head(df[order(df$padj) & df$diffexpressed == 'DOWN', ])<br /><br /><br />
-#   
-library(ggrepel)
-# plot adding up all layers we have seen so far
+                            isOutput = TRUE, saveRawGseaResult = FALSE, projectName = paste0("Beta1vsBeta2-", as.character(as.integer(Sys.time()))))
 
 
-enrichResult$diffexpressed <- "NO"
-# if log2Foldchange > 0.6 and pvalue < 0.05, set as "UP"
-enrichResult$diffexpressed[enrichResult$normalizedEnrichmentScore > 2 & enrichResult$FDR < 0.05] <- "UP"
-# if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"
-enrichResult$diffexpressed[enrichResult$normalizedEnrichmentScore < -2 & enrichResult$FDR < 0.05] <- "DOWN"
-enrichResult$delabel <- NA
-enrichResult$delabel[enrichResult$diffexpressed != "NO"] <- enrichResult$description[enrichResult$diffexpressed != "NO"]
+enrich.plot <- enrichResult[,c("normalizedEnrichmentScore", "FDR", "size", "description")]
+enrich.plot$diffexpressed <- "NO"
+enrich.plot$diffexpressed[enrich.plot$normalizedEnrichmentScore > 2 & enrich.plot$FDR < 0.05] <- "UP"
+enrich.plot$diffexpressed[enrich.plot$normalizedEnrichmentScore < -2 & enrich.plot$FDR < 0.05] <- "DOWN"
+enrich.plot$delabel <- NA
+enrich.plot$delabel[enrich.plot$diffexpressed != "NO"] <- enrich.plot$description[enrich.plot$diffexpressed != "NO"]
+enrich.plot$FDR[enrich.plot$FDR == 0] <- min(enrich.plot$FDR[enrich.plot$FDR > 0]/100) #Change positions where enrich.plot$FDR == 0 to something that's plot-able
 
 
 mycolors <- c("blue", "red", "black")
 names(mycolors) <- c("DOWN", "UP", "NO")
 
-ggplot(data=enrichResult, aes(x=normalizedEnrichmentScore, y=-log10(FDR), col=diffexpressed, label=delabel)) +
+ggplot(data=enrich.plot, aes(x=normalizedEnrichmentScore, y=-log10(FDR), col=diffexpressed, label=delabel)) +
   geom_point() +
   theme_minimal() +
-  geom_text_repel() +
+  geom_text_repel(max.overlaps = 15, ) +
   scale_color_manual(values=mycolors) +
-  ylim(c(0, 200)) +
+  ylim(c(0, max(-log10(enrich.plot$FDR)+1))) +
   geom_vline(xintercept=c(-0.6, 0.6), col="red") +
   geom_hline(yintercept=-log10(0.05), col="red")
 
 
 
-ggplot(data = enrichResult, aes(x = normalizedEnrichmentScore, y = negLog10FDR)) + 
+# Web Gestalt Exocrine Markers --------------------------------------------
+
+seurat.subset$SampleEthnicity <- factor(seurat.subset$SampleEthnicity)
+
+exocrine.subset <- subset(seurat.subset, idents = c("Exocrine1", "Exocrine2"))
+Idents(exocrine.subset) <- "SampleEthnicity"
+levels(exocrine.subset@active.ident)
+
+
+
+exocrine.subset <- PrepSCTFindMarkers(exocrine.subset, assay = "SCT")
+exocrine.ancestry <- FindMarkers(exocrine.subset, ident.1 = "African american/Black", ident.2 = "Caucasian")
+exocrine.ancestry$genes <- rownames(exocrine.ancestry)
+exocrine.ancestry <- exocrine.ancestry %>%
+  filter(p_val_adj < 0.05) %>%
+  arrange(-abs(avg_log2FC))
+rownames(exocrine.ancestry) <- exocrine.ancestry$genes
+head(exocrine.ancestry)
+
+saveRDS(exocrine.ancestry, file = paste0(rnaProject, "-ExocrineAncestry-markers.rds"))
+View(exocrine.ancestry)
+
+DotPlot(exocrine.subset, features = rownames(exocrine.ancestry[abs(exocrine.ancestry$avg_log2FC) >= 1.5,]), cols = "RdBu") + coord_flip()
+png(filename = "ExocrinePancreas_AAvsEA.png", height = 1200, width = 800, bg = "transparent")
+DotPlot(exocrine.subset, features = rownames(exocrine.ancestry[abs(exocrine.ancestry$avg_log2FC) >= 1.5,]), cols = "RdBu") + coord_flip()
+dev.off()
+
+png(filename = "Exocrines-AAvsEA_abstractFeatures_AAvsEA-VLN.png", height = 800, width = 1000, bg = "transparent")
+VlnPlot(exocrine.subset, features = c("PNLIP", "PRSS1", "REG1A", "REG1B", "SPINK1"), split.by = "SampleEthnicity", split.plot = FALSE, pt.size = 0.1, combine = TRUE, cols = c("red", "blue"))
+dev.off()
+
+png(filename = "Exocrines-AAvsEA_abstractFeatures_AAvsEA-DOT.png", height = 1000, width = 800, bg = "transparent")
+DotPlot(exocrine.subset, features = features.list, cols = "RdBu", dot.scale = 25) + coord_flip()
+dev.off()
+
+
+seurat.markers <- exocrine.ancestry
+seurat.markers$gene <- rownames(seurat.markers)
+seurat.markers<- seurat.markers %>%
+  select(-pct.1, -pct.2, -p_val)
+seurat.markers.cluster0 <- seurat.markers %>%
+  filter(p_val_adj < 0.05) %>%
+  select(-p_val_adj) %>%
+  relocate(gene, avg_log2FC)
+seurat.markers.cluster0 <- data.frame(seurat.markers.cluster0)
+rownames(seurat.markers.cluster0) <- 1:nrow(seurat.markers.cluster0)
+
+features.list <- c("PNLIP", "PRSS1", "REG1A", "REG1B", "SPINK1")
+exocrine.ancestry[exocrine.ancestry$genes %in% features.list,]
+
+
+
+enrich.databases <- c(
+  "pathway_KEGG",
+  # "pathway_Reactome",
+  # "pathway_Panther",
+  # "pathway_Wikipathway",
+  # "geneontology_Biological_Process",
+  # "geneontology_Cellular_Component_noRedundant",
+  "geneontology_Molecular_Function_noRedundant"
+  # "disease_OMIM",
+  # "disease_Disgenet",
+  # "drug_DrugBank",
+  # "drug_GLAD4U"
+  # "disease_GLAD4U",
+  # "phenotype_Human_Phenotype_Ontology"
+)
+
+enrichResult <- WebGestaltR(enrichMethod="GSEA", organism="hsapiens",
+                            enrichDatabase=enrich.databases, interestGene = seurat.markers.cluster0,
+                            interestGeneType="genesymbol", sigMethod="top", topThr=2000, minNum=10, fdrThr = 1,
+                            isOutput = TRUE, saveRawGseaResult = FALSE, projectName = paste0("Exocrines-AAvsEA", as.character(as.integer(Sys.time()))))
+
+
+enrich.plot <- enrichResult[,c("normalizedEnrichmentScore", "FDR", "size", "description")]
+enrich.plot$diffexpressed <- "NO"
+enrich.plot$diffexpressed[enrich.plot$normalizedEnrichmentScore > 2 & enrich.plot$FDR < 0.05] <- "UP"
+enrich.plot$diffexpressed[enrich.plot$normalizedEnrichmentScore < -2 & enrich.plot$FDR < 0.05] <- "DOWN"
+enrich.plot$delabel <- NA
+enrich.plot$delabel[enrich.plot$diffexpressed != "NO"] <- enrich.plot$description[enrich.plot$diffexpressed != "NO"]
+enrich.plot$FDR[enrich.plot$FDR == 0] <- min(enrich.plot$FDR[enrich.plot$FDR > 0]/100) #Change positions where enrich.plot$FDR == 0 to something that's plot-able
+
+
+mycolors <- c("blue", "red", "black")
+names(mycolors) <- c("DOWN", "UP", "NO")
+
+ggplot(data=enrich.plot, aes(x=normalizedEnrichmentScore, y=-log10(FDR), col=diffexpressed, label=delabel)) +
   geom_point() +
   theme_minimal() +
-  geom_text()
-  
+  geom_text_repel(max.overlaps = 15, ) +
+  scale_color_manual(values=mycolors) +
+  ylim(c(0, max(-log10(enrich.plot$FDR)+1))) +
+  geom_vline(xintercept=c(-0.6, 0.6), col="red") +
+  geom_hline(yintercept=-log10(0.05), col="red")
 
 
-# scale_color_manual(values = c("#00AFBB", "grey", "#FFDB6D"), # to set the colours of our variable<br /><br /><br />
-#                      labels = c("Downregulated", "Not significant", "Upregulated")) + # to set the labels in case we want to overwrite the categories from the dataframe (UP, DOWN, NO
-#   geom_point(size = 5)
+
+
 
 
 
@@ -755,7 +943,7 @@ atacProject.coldata[atacProject.coldata$id %in% n_occur$Var1[n_occur$Freq > 1],]
 
 # cds <- readRDS("Obesity_scRNA-SCTRegression-NW-OB-monocle3CDS.RDS")
 
-# Differential abundance testing ------------------------------------------
+# Differential abundance testing - speckle ------------------------------------------
 library(speckle)
 library(limma)
 library(ggplot2)
@@ -772,7 +960,85 @@ plotCellTypeProps(clusters=seurat.object$Obesity, sample=seurat.object$SCT_snn_r
 
 
 
-# Differential abundance testing ------------------------------------------
+# Differential abundance testing - scProportionTest ------------------------------------------
+
+library(scProportionTest)
+
+
+seurat.object <- readRDS("/Users/heustonef/Desktop/PancDB_Data/PancT2D_scRNA/PancT2D_AAvsEUonly-doPar-SCTeach-95pctvar.RDS")
+seurat.subset <- subset(seurat.object, idents = c("1", "15"), invert = TRUE)
+levels(seurat.subset)
+cluster.ids.subset <- c(
+  "Exocrine1", #SCT0
+  "Alpha2", #SCT2
+  "Exocrine2", #SCT3--REG1A
+  "Beta1", #SCT4
+  "Epithelial", #SCT5--KRT18
+  "Endothelial", #SCT6
+  "Alpha3", #SCT7
+  "Beta2", #SCT8
+  "Immune1", #SCT9--IGFBP7
+  "Alpha4", #SCT10
+  "Immune3", #SCT11--IGFBP7/NEAT1
+  "Alpha1", #SCT12
+  "Immune4", #SCT13--NEAT1
+  "Mast Cells", #SCT14--TPSB2
+  "Macrophages", #SCT16
+  "Immune2" #SCT17
+)
+names(cluster.ids.subset) <- levels(seurat.subset)
+seurat.subset <- RenameIdents(seurat.subset, cluster.ids.subset)
+seurat.subset$cell.ids <- seurat.subset@active.ident
+
+prop_test <- sc_utils(seurat.subset) #sc_utils object required for permutation_test
+prop_test <- permutation_test(prop_test, cluster_identity = "cell.ids",
+                              sample_1 = "Caucasian", sample_2 = "African american/Black", 
+                              sample_identity = "SampleEthnicity")
+
+permutation_plot(prop_test, order_clusters = TRUE)
+
+png(filename = "CellIDs-permutation_test.png", height = 800, width = 1200)
+permutation_plot(prop_test, order_clusters = TRUE)
+dev.off()
+
+
+general.ids.subset <- c(
+  "Exocrine", # "Exocrine1", #SCT0
+  "Alpha", # "Alpha2", #SCT2
+  "Exocrine", # "Exocrine2", #SCT3--REG1A
+  "Beta", # "Beta1", #SCT4
+  "Epithelial", # "Epithelial", #SCT5--KRT18
+  "Endothelial", # "Endothelial", #SCT6
+  "Alpha", # "Alpha3", #SCT7
+  "Beta", # "Beta2", #SCT8
+  "Immune", # "Immune1", #SCT9--IGFBP7
+  "Alpha", # "Alpha4", #SCT10
+  "Immune", # "Immune3", #SCT11--IGFBP7/NEAT1
+  "Alpha", # "Alpha1", #SCT12
+  "Immune", # "Immune4", #SCT13--NEAT1
+  "Immune", # "Mast Cells", #SCT14--TPSB2
+  "Immune", # "Macrophages", #SCT16
+  "Immune" # "Immune2" #SCT17
+)
+
+prop_test <- seurat.subset
+names(general.ids.subset) <- levels(prop_test)
+prop_test <- RenameIdents(prop_test, general.ids.subset)
+prop_test$general.ids <- prop_test@active.ident
+
+
+prop_test <- sc_utils(prop_test) #sc_utils object required for permutation_test
+prop_test <- permutation_test(prop_test, cluster_identity = "general.ids",
+                              sample_1 = "Caucasian", sample_2 = "African american/Black", 
+                              sample_identity = "SampleEthnicity")
+
+permutation_plot(prop_test, order_clusters = TRUE)
+
+png(filename = "GeneralIDs-permutation_test.png", height = 800, width = 1200)
+permutation_plot(prop_test, order_clusters = TRUE)
+dev.off()
+
+# Differential abundance testing - edgeR ------------------------------------------
 
 #https://bioconductor.org/books/3.13/OSCA.multisample/differential-abundance.html
 library(edgeR)
