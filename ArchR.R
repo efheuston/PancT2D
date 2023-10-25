@@ -483,15 +483,15 @@ heatmap.islets <- plotMarkerHeatmap(seMarker = arch.markers,
 																		transpose = TRUE)
 
 
-heatmap.plot <- ComplexHeatmap::draw(heatmap.islets, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+heatmap.plot <- ComplexHeatmap::draw(heatmap.islets, heatmap_legend_side = "bot", annotation_legend_side = "bot", cluster_rows = TRUE, background = "transparent")
 
-png(filename = paste0(atacProject, "-UMAP_harmony-res", as.character(res), "-AllMarkersheatmap.png"), height= 800, width = 1600, bg = "transparent", res = 100)
+png(filename = paste0("~/OneDrive-NIH/SingleCellMetaAnalysis/GitRepositories/PancT2D/", atacProject, "-UMAP_harmony-res", as.character(res), "-AllMarkersheatmap.png"), height= 800, width = 1600, bg = "transparent", res = 100)
 plot(heatmap.plot)
 dev.off()
 
-gene.set <- features.dotplot
+# gene.set <- features.dotplot
 
-for(i in 1:length(features)){
+for(i in 1:length(panc.markers)){
 	chart.name <- names(panc.markers[i])
 	gene.set <- panc.markers[i]
 	
@@ -501,9 +501,13 @@ for(i in 1:length(features)){
 																			transpose = TRUE)
 	
 	
-	heatmap.plot <- ComplexHeatmap::draw(heatmap.islets, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+	heatmap.plot <- ComplexHeatmap::draw(heatmap.islets, 
+	                                     heatmap_legend_side = "bot", 
+	                                     annotation_legend_side = "bot", 
+	                                     cluster_rows = TRUE,
+	                                     background = "transparent")
 	
-	png(filename = paste0(atacProject, "-UMAP_harmony-res", as.character(res), "-", as.character(chart.name), "Markersheatmap.png"), height= 800, width = 1600, bg = "transparent", res = 100)
+	png(filename = paste0("~/OneDrive-NIH/SingleCellMetaAnalysis/GitRepositories/PancT2D/", atacProject, "-UMAP_harmony-res", as.character(res), "-", as.character(chart.name), "Markersheatmap.png"), height= 800, width = 1600, bg = "transparent", res = 100)
 	plot(heatmap.plot)
 	dev.off()
 	
