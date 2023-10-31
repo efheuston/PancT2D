@@ -54,10 +54,10 @@ library(cowplot)
 
 ##load local functions
 invisible(sapply(sourceable.functions, source))
+try(setwd(rna.dir), silent = TRUE)
 
 # Load data ---------------------------------------------------------------
 
-try(setwd(rna.dir), silent = TRUE)
 writeLines(capture.output(sessionInfo()), paste0(rnaProject, "_sessionInfo.txt"))
 
 ## load data list
@@ -477,6 +477,8 @@ dev.off()
 
 DimPlot(seurat.subset, group.by = "integrated_snn_res.0.5", cols = color.palette, shuffle = TRUE, label = FALSE, label.size = 5) + NoLegend()
 
+temp.palette <- color.palette
+temp.palette[c(1, 3, 12)] <- c("maroon", "darkturquoise", "red")
 DimPlot(seurat.subset, group.by = "integrated_snn_res.0.5", shuffle = T, cols = color.palette, pt.size = 3, label = T)
 
 png(filename = "seurat-clusteredByident.png", height = 1200, width = 1200, bg = "transparent")
@@ -536,7 +538,7 @@ VlnPlot(seurat.subset, features = "G2M.Score", cols = color.palette, idents = c(
 
 VlnPlot(subset(seurat.subset, idents = c("Exocrine1", "Exocrine2")), features = c("HNF4A", "HNF4G", "TCF7L2"), split.by = "SampleEthnicity", split.plot = TRUE)
 png(filename = "Beta1VBeta2-dotplot.png", height = 800, width = 1200)
-VlnPlot(subset(seurat.subset, idents = c("Beta1", "Beta2")), features = c("IAPP", "PPP1R1A", "percent.mt"), split.plot = FALSE)
+VlnPlot(subset(seurat.subset, idents = c("Beta1", "Beta2")), features = c("IAPP", "PPP1R1A", "percent.mt"), split.plot = FALSE, cols = c("green", "darkviolet"))
 dev.off()
 
 # Define Subpopulation differences -----------------------------------------------
@@ -645,6 +647,167 @@ beta.subset <- subset(seurat.subset, idents = c("Beta1", "Beta2"))
 DimPlot(beta.subset)
 VlnPlot(beta.subset, features = c("GCK", "HK1", "SLC2A2", "CD9", "ST8SIA1"))
 
+beta.palette <- c("green", "darkviolet")
+
+# Explore Exocrine --------------------------------------------------------
+
+exocrine.subset <- subset(seurat.subset, idents = c("Exocrine1", "Exocrine2"))
+
+Idents(exocrine.subset) <- "SampleEthnicity"
+levels(exocrine.subset)
+png(filename = "seurat-exocrineAAvsEA.png", height = 1200, width = 1200, bg = "transparent")
+DimPlot(exocrine.subset, group.by = "SampleEthnicity", cols = c("red", "blue"), shuffle = TRUE, label = FALSE, label.size = 5) + NoLegend() &
+  theme(legend.background = element_rect(fill = "transparent"),
+        legend.box.background = element_rect(fill = "transparent"),
+        panel.background = element_rect(fill = "transparent"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_rect(fill = "transparent",
+                                       color = NA))
+dev.off()
+
+png(filename = "seurat-Exocrine1vsExocrine2.png", height = 1200, width = 1200, bg = "transparent")
+DimPlot(exocrine.subset, group.by = "cell.ids", cols = c("maroon", "darkturquoise"), shuffle = TRUE, label = FALSE, label.size = 5) + NoLegend() &
+  theme(legend.background = element_rect(fill = "transparent"),
+        legend.box.background = element_rect(fill = "transparent"),
+        panel.background = element_rect(fill = "transparent"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_rect(fill = "transparent",
+                                       color = NA))
+dev.off()
+
+
+exocrine.subset <- PrepSCTFindMarkers(exocrine.subset)
+exocrine.markers <- FindMarkers(exocrine.subset, ident.1 = "African american/Black", ident.2 = "Caucasian")
+exocrine.markers <- exocrine.markers %>%
+  arrange(desc(abs(avg_log2FC)), .by_group = TRUE)
+saveRDS(exocrine.markers, file = paste0(rnaProject, "-Exocrine-markers-AAvsEA.rds"))
+
+exocrine.features <- c("MTRNR2L12", "AMY2B", "REG3A", "INS", "TTR", "GCG", "PPY", "SST", "SCG5")
+features.heatmap <- exocrine.markers %>%
+  filter(p_val_adj <= 0.05 & abs(avg_log2FC) >= 2) %>%
+  rownames()
+
+DoHeatmap(subset(exocrine.subset, downsample = 1000), features = features.heatmap, size = 3, group.colors = c("red", "blue"))
+
+classic.exocrine.markers <- c("PNLIP", "PRSS1", "REG1A", "REG1B", "SPINK1", "AMY2A")
+RidgePlot(exocrine.subset, features = c("PNLIP", "PRSS1", "REG1A", "REG1B", "SPINK1", "AMY2A"), ncol = 2, group.by = "cell.ids")
+RidgePlot(exocrine.subset, features = features.heatmap[1:8], ncol = 2, group.by = "cell.ids", cols = c("red", "tan1"), sort = TRUE)
+
+
+png(filename = "Exocrines-AAvsEA_abstractFeatures_AAvsEA-ridge.png", height = 600, width = 1200, bg = "transparent")
+RidgePlot(exocrine.subset, features = exocrine.features, ncol = 3, group.by = "SampleEthnicity", cols = c("red", "blue"))
+dev.off()
+
+png(filename = "Exocrines-AAvsEA_abstractFeatures_AAvsEA-VLN.png", height = 800, width = 1000, bg = "transparent")
+VlnPlot(exocrine.subset, features = c("PNLIP", "PRSS1", "REG1A", "REG1B", "SPINK1","AMY2A"), split.by = "SampleEthnicity", split.plot = FALSE, pt.size = 0.1, combine = TRUE, cols = c("red", "blue"))
+dev.off()
+
+png(filename = "Exocrines_abstractFeatures_1vs2-VLN.png", height = 800, width = 1000, bg = "transparent")
+VlnPlot(exocrine.subset, features = c("PNLIP", "PRSS1", "REG1A", "REG1B", "SPINK1","AMY2A"), split.by = "cell.ids", split.plot = FALSE, pt.size = 0.1, combine = TRUE, cols = c("maroon", "darkturquoise")) &
+  theme(legend.background = element_rect(fill = "transparent"),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.x = element_blank(),
+        legend.box.background = element_rect(fill = "transparent"),
+        panel.background = element_rect(fill = "transparent"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_rect(fill = "transparent", color = NA))
+dev.off()
+
+
+
+png(filename = "Exocrines_features_1vs2-VLN.png", height = 800, width = 1000, bg = "transparent")
+VlnPlot(exocrine.subset, features = exocrine.features, split.by = "cell.ids", split.plot = FALSE, pt.size = 0.1, combine = TRUE, cols = c("maroon", "darkturquoise")) &
+  theme(legend.background = element_rect(fill = "transparent"),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.x = element_blank(),
+        legend.box.background = element_rect(fill = "transparent"),
+        panel.background = element_rect(fill = "transparent"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_rect(fill = "transparent", color = NA))
+dev.off()
+
+
+exocrine.features <- c("MTRNR2L12", "AMY2B", "REG3A", "INS", "TTR", "GCG", "PPY", "SST", "SCG5")
+for(i in exocrine.features){
+  gene.name <- i
+  print(i)
+  p <- VlnPlot(exocrine.subset, features = gene.name, split.by = "cell.ids", split.plot = FALSE, pt.size = 0.1, combine = TRUE, cols = c("maroon", "darkturquoise")) + NoLegend() &
+    theme(legend.background = element_rect(fill = "transparent"),
+          axis.title.x = element_blank(),
+          axis.title.y = element_blank(),
+          axis.text.x = element_blank(),
+          legend.box.background = element_rect(fill = "transparent"),
+          panel.background = element_rect(fill = "transparent"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          plot.background = element_rect(fill = "transparent", color = NA))
+  png(filename = paste0("Exocrines_features_1vs2-VLN-", gene.name, ".png"), height = 400, width = 800, bg = "transparent")
+  plot(p)
+  dev.off()
+}
+
+for(i in exocrine.features){
+  gene.name <- i
+  print(i)
+  p <- RidgePlot(exocrine.subset, features = gene.name, group.by = "SampleEthnicity", cols = c("red", "blue"))+ NoLegend() &
+    theme(legend.background = element_rect(fill = "transparent"),
+          axis.title.x = element_blank(),
+          axis.title.y = element_blank(),
+          axis.text.y = element_blank(),
+          panel.background = element_rect(fill = "transparent"),
+          plot.background = element_rect(fill = "transparent", color = NA))
+  png(filename = paste0("Exocrines_classics_1vs2-ridge-", gene.name, ".png"), height = 400, width = 800, bg = "transparent")
+  plot(p)
+  dev.off()
+}
+
+
+
+RidgePlot(exocrine.subset, features = "GCG", ncol = 3, group.by = "SampleEthnicity", cols = c("red", "blue"))+ NoLegend() &
+  theme(
+    legend.background = element_rect(fill = "transparent"),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        # panel.background = element_rect(fill = "transparent"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_rect(fill = "transparent", color = NA))
+
+
+
+
+
+
+
+exocrine.heatmap <- exocrine.markers %>%
+  mutate_at("Exocrine", ~(scale(.) %>% as.vector))
+
+
+exocrine.hm <- DoHeatmap(exocrine.subset, features = exocrine.features, slot = "data")
+exocrine.hm <- exocrine.hm$data
+exocrine.hm <- na.omit(exocrine.hm)
+exocrine.hm <- data.frame(exocrine.hm)
+exocrine.hm$cell.id <- exocrine.hm$Cell
+for(i in nrow(exocrine.hm)){
+  cell.name <- exocrine.hm[i, "Cell"]
+  exocrine.hm[cell.name, "cell.id"] <- exocrine.subset@meta.data[cell.name, "cell.ids"]
+}
+head(exocrine.hm)
+exocrine.hm[33057, ]
+
+markers.table <- openxlsx::createWorkbook()
+openxlsx::addWorksheet(markers.table, sheetName = "ExocrineAAvsEA")
+openxlsx::writeData(markers.table, sheet = "ExocrineAAvsEA", x = exocrine.markers, startCol = 1, startRow = 1, colNames = TRUE, rowNames = TRUE)
+openxlsx::saveWorkbook(wb = markers.table, file = paste0(rnaProject, "_ExocrineMarkersAAvsEA.xlsx"), overwrite = FALSE, returnValue = TRUE)
+
+
 
 # Downsampling ------------------------------------------------------------
 
@@ -751,7 +914,8 @@ library(WebGestaltR)
 library(ggplot2)
 library(ggrepel)
 
-seurat.markers <- readRDS("/Users/heustonef/Desktop/PancDB_Data/PancT2D_scRNA/PancT2D_AAvsEUonly-doPar-SCTeach-allmarkers-95pctvar.rds")
+#load  markers list from seurat `FindMarkers`
+seurat.markers <- readRDS("/Users/heustonef/Desktop/PancDB_Data/PancT2D_scRNA/PancT2D_AAvsEUonly-doPar-SCTeach-allmarkers-95pctvar.rds") 
 
 colnames(seurat.markers)
 seurat.markers<- seurat.markers %>%
@@ -767,60 +931,115 @@ seurat.markers.cluster0 <- data.frame(seurat.markers.cluster0)
 
 # Web Gestalt Beta Markers --------------------------------------------
 
-seurat.markers <- readRDS("~/Desktop/PancDB_Data/ASHG2023/PancT2D_AAvsEUonly-doPar-Beta-markers.rds")
-seurat.markers$gene <- rownames(seurat.markers)
-seurat.markers<- seurat.markers %>%
+library(WebGestaltR)
+library(ggplot2)
+library(ggrepel)
+
+web.genesets <- listGeneSet()
+View(web.genesets)
+
+#load  markers list from seurat `FindMarkers`
+beta.markers <- readRDS("~/Desktop/PancDB_Data/ASHG2023/PancT2D_AAvsEUonly-doPar-Beta-markers.rds")
+
+# reformat to include only significant markers
+beta.markers$gene <- rownames(beta.markers)
+beta.markers<- beta.markers %>%
   select(-pct.1, -pct.2, -p_val)
-seurat.markers.cluster0 <- seurat.markers %>%
+beta.markers.trim <- beta.markers %>%
   filter(p_val_adj < 0.05) %>%
   select(-p_val_adj) %>%
   relocate(gene, avg_log2FC)
-seurat.markers.cluster0 <- data.frame(seurat.markers.cluster0)
-rownames(seurat.markers.cluster0) <- 1:nrow(seurat.markers.cluster0)
+beta.markers.trim <- data.frame(beta.markers.trim)
+rownames(beta.markers.trim) <- 1:nrow(beta.markers.trim)
 
+#Select databases to test
 enrich.databases <- c(
                       "pathway_KEGG",
-                      # "pathway_Reactome",
+                      "pathway_Reactome",
                       # "pathway_Panther",
-                      # "pathway_Wikipathway",
-                      # "geneontology_Biological_Process",
+                      "pathway_Wikipathway",
+                      "geneontology_Biological_Process",
                       # "geneontology_Cellular_Component_noRedundant",
-                      "geneontology_Molecular_Function_noRedundant",
+                      "geneontology_Molecular_Function_noRedundant"
                       # "disease_OMIM",
                       # "disease_Disgenet",
                       # "drug_DrugBank",
                       # "drug_GLAD4U"
-                      "disease_GLAD4U",
-                      "phenotype_Human_Phenotype_Ontology"
+                      # "disease_GLAD4U",
+                      # "phenotype_Human_Phenotype_Ontology"
+                      # "network_Transcription_Factor_target",
+                      # "network_TCGA_RNASeq_PAAD"
                       )
+# Perform WebGestaltR analysis using`enrichMethod="GSEA"` & `organism="hsapiens"`, with FDR  as significant
+enrichResult <- WebGestaltR(enrichMethod="GSEA", organism="hsapiens",
+                            enrichDatabase=enrich.databases, interestGene = beta.markers.trim,
+                            interestGeneType="genesymbol", sigMethod = "fdr", minNum=10, fdrThr = 1, gseaPlotFormat = "png",
+                            isOutput = TRUE, saveRawGseaResult = FALSE, projectName = paste0("Beta1vsBeta2-pwayandgo-", as.character(as.integer(Sys.time()))))
+
+#Manually curate list in excel to limit plottable data to `FDR < 0.1  #< 0.05`. Alternatively, plot volcano using function below.
+
+#GSEA per assay
+
+enrichResult.list<- c()
+for(val in 1:length(enrich.databases)){
+  i <- enrich.databases[val]
+  enrichResult <- WebGestaltR(enrichMethod="GSEA", organism="hsapiens",
+                              enrichDatabase=i, interestGene = beta.markers.trim,
+                              interestGeneType="genesymbol", sigMethod = "fdr", minNum=10, fdrThr = 1, gseaPlotFormat = "png",
+                              isOutput = TRUE, saveRawGseaResult = FALSE, projectName = paste0("Beta1vsBeta2-", i, "-", as.character(as.integer(Sys.time()))))
+  enrichResult.list <- rbind(enrichResult.list, enrichResult)
+}
+View(enrichResult.list)
+#ORA
+for(i in enrich.databases){
+  enrichResult <- WebGestaltR(enrichMethod="ORA", organism="hsapiens",
+                              enrichDatabase=i, interestGene = beta.markers.trim$gene,
+                              interestGeneType="genesymbol", 
+                              referenceGeneType="genesymbol", 
+                              sigMethod = "fdr", 
+                              minNum=10, fdrThr = 1, gseaPlotFormat = "png",
+                              isOutput = TRUE, saveRawGseaResult = FALSE, projectName = paste0("Beta1vsBeta2-", i, "-", as.character(as.integer(Sys.time()))))
+  enrichResult.list <- c(enrichResult.list, enrichResult)
+}
 
 enrichResult <- WebGestaltR(enrichMethod="GSEA", organism="hsapiens",
-                            enrichDatabase=enrich.databases, interestGene = seurat.markers.cluster0,
-                            interestGeneType="genesymbol", sigMethod="top", topThr=2000, minNum=10, fdrThr = 1,
-                            isOutput = TRUE, saveRawGseaResult = FALSE, projectName = paste0("Beta1vsBeta2-", as.character(as.integer(Sys.time()))))
+                            enrichDatabase="pathway_Wikipathway", interestGene = beta.markers.trim,
+                            interestGeneType="genesymbol", sigMethod = "fdr", minNum=10, fdrThr = 1, gseaPlotFormat = "png",
+                            isOutput = FALSE, saveRawGseaResult = FALSE, projectName = paste0("Beta1vsBeta2-", as.character(as.integer(Sys.time()))))
 
 
+enrichResult <- enrichResult.list
+colnames(enrichResult)
 enrich.plot <- enrichResult[,c("normalizedEnrichmentScore", "FDR", "size", "description")]
 enrich.plot$diffexpressed <- "NO"
-enrich.plot$diffexpressed[enrich.plot$normalizedEnrichmentScore > 2 & enrich.plot$FDR < 0.05] <- "UP"
-enrich.plot$diffexpressed[enrich.plot$normalizedEnrichmentScore < -2 & enrich.plot$FDR < 0.05] <- "DOWN"
+enrich.plot$diffexpressed[enrich.plot$normalizedEnrichmentScore > 1.5 & enrich.plot$FDR < 0.05] <- "UP"
+enrich.plot$diffexpressed[enrich.plot$normalizedEnrichmentScore < -1.5 & enrich.plot$FDR < 0.05] <- "DOWN"
 enrich.plot$delabel <- NA
 enrich.plot$delabel[enrich.plot$diffexpressed != "NO"] <- enrich.plot$description[enrich.plot$diffexpressed != "NO"]
-enrich.plot$FDR[enrich.plot$FDR == 0] <- min(enrich.plot$FDR[enrich.plot$FDR > 0]/100) #Change positions where enrich.plot$FDR == 0 to something that's plot-able
+enrich.plot$FDR[enrich.plot$FDR == 0] <- min(enrich.plot$FDR[enrich.plot$FDR > 0]/2) #Change positions where enrich.plot$FDR == 0 to something that's plot-able
 
 
 mycolors <- c("blue", "red", "black")
 names(mycolors) <- c("DOWN", "UP", "NO")
 
-ggplot(data=enrich.plot, aes(x=normalizedEnrichmentScore, y=-log10(FDR), col=diffexpressed, label=delabel)) +
-  geom_point() +
-  theme_minimal() +
-  geom_text_repel(max.overlaps = 15, ) +
+
+p <- ggplot(data=enrich.plot, aes(x=normalizedEnrichmentScore, y=-log10(FDR), col=diffexpressed, label=delabel)) +
+  theme_minimal(axis.text.x = element_text(csize = 20)) +
+  # geom_text_repel(max.overlaps = 30) +
   scale_color_manual(values=mycolors) +
   ylim(c(0, max(-log10(enrich.plot$FDR)+1))) +
-  geom_vline(xintercept=c(-0.6, 0.6), col="red") +
-  geom_hline(yintercept=-log10(0.05), col="red")
+  xlim(c(min(enrich.plot$normalizedEnrichmentScore)-1, max(enrich.plot$normalizedEnrichmentScore)+1)) +
+  geom_vline(xintercept=c(-0.6, 0.6), col="gray", linetype = "dashed", size = 1.1) +
+  geom_vline(xintercept=c(0), col="black", linetype = 1, size = 1.1) +
+  geom_hline(yintercept=c(0), col="black", linetype = 1, size = 1.1) +
+  geom_hline(yintercept=-log10(0.05), col="gray", linetype = "dashed", size = 1.1)+
+  geom_point(aes(size = size, alpha = 0.5)) + 
+  scale_size(range = c(1, 10))
+plot(p)
 
+png(filename = "beta1vbeta2_volcano_all.png", height = 600, width = 1200, bg = "transparent")
+plot(p)
+dev.off()
 
 
 # Web Gestalt Exocrine Markers --------------------------------------------
@@ -953,7 +1172,36 @@ library(ggplot2)
 # biological replicates in each group
 # Run propeller testing for cell type proportion differences between the two 
 # groups
-propeller(clusters = Idents(seurat.object), sample = seurat.object$DonorID, group = seurat.object$Obesity, transform = "asin")
+
+seurat.object <- readRDS("/Users/heustonef/Desktop/PancDB_Data/PancT2D_scRNA/PancT2D_AAvsEUonly-doPar-SCTeach-95pctvar.RDS")
+seurat.subset <- subset(seurat.object, idents = c("1", "15"), invert = TRUE)
+levels(seurat.subset)
+cluster.ids.subset <- c(
+  "Exocrine1", #SCT0
+  "Alpha2", #SCT2
+  "Exocrine2", #SCT3--REG1A
+  "Beta1", #SCT4
+  "Epithelial", #SCT5--KRT18
+  "Endothelial", #SCT6
+  "Alpha3", #SCT7
+  "Beta2", #SCT8
+  "Immune1", #SCT9--IGFBP7
+  "Alpha4", #SCT10
+  "Immune3", #SCT11--IGFBP7/NEAT1
+  "Alpha1", #SCT12
+  "Immune4", #SCT13--NEAT1
+  "Mast Cells", #SCT14--TPSB2
+  "Macrophages", #SCT16
+  "Immune2" #SCT17
+)
+names(cluster.ids.subset) <- levels(seurat.subset)
+seurat.subset <- RenameIdents(seurat.subset, cluster.ids.subset)
+seurat.subset$cell.ids <- seurat.subset@active.ident
+seurat.subset$cell.ids <- factor(seurat.subset$cell.ids)
+DimPlot(seurat.subset)
+
+propeller(clusters = seurat.subset$cell.ids, sample = seurat.subset$DonorID, group = seurat.subset$SampleEthnicity, transfor = "asin", robust = F)
+
 
 # Plot cell type proportions
 plotCellTypeProps(clusters=seurat.object$Obesity, sample=seurat.object$SCT_snn_res.0.5)
@@ -994,6 +1242,8 @@ prop_test <- sc_utils(seurat.subset) #sc_utils object required for permutation_t
 prop_test <- permutation_test(prop_test, cluster_identity = "cell.ids",
                               sample_1 = "Caucasian", sample_2 = "African american/Black", 
                               sample_identity = "SampleEthnicity")
+
+prop_test
 
 permutation_plot(prop_test, order_clusters = TRUE)
 

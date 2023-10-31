@@ -309,7 +309,6 @@ ComplexHeatmap::draw(heatmapcistrome, heatmap_legend_side = "bot", annotation_le
 
 
 
-
 # comparing different groups ----------------------------------------------
 
 beta.markers <- getMarkerFeatures(
@@ -321,7 +320,16 @@ beta.markers <- getMarkerFeatures(
   useGroups = c("C1", "C2", "C9", "C10"),
   bgdGroups = c("C3", "C12", "C21", "C9", "C15", "C22", "C13", "C16", "C24", "C23", "C19", "C20", "C14", "C17", "C4", "C18", "C6", "C8", "C7", "C25", "C5")
 )
-saveRDS(beta.markers, file = paste0(atacProject, "-BetaMarkerPeaks.RDS"))
+saveRDS(beta.markers, file = paste0(atacProject, "-Beta_byATAC-MarkerPeaks.RDS"))
+
+enrichEncode <- peakAnnoEnrichment(seMarker = exocrine.markers, ArchRProj = arch.proj, peakAnnotation = "exocrineencode", cutOff = "FDR <= 0.1 & Log2FC >= 0.5")
+heatmapEncode <- plotEnrichHeatmap(enrichEncode, n = 7, transpose = TRUE)
+tfbshm <-ComplexHeatmap::draw(heatmapEncode, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+plot(tfbshm)
+png(filename = "ATAC_EXOCRINEtfbsHM-vsALL.png", height = 800, width = 800)
+plot(tfbshm)
+dev.off()
+
 
 exocrine.markers <- getMarkerFeatures(
   ArchRProj = arch.proj, 
@@ -364,9 +372,6 @@ saveArchRProject(ArchRProj = arch.proj, outputDirectory = working.dir, zload = T
 
 
 
-# Footprinting ------------------------------------------------------------
-
-motifPositions <- getPositions(arch.proj)
 
 
 # Deviant Motifs ----------------------------------------------------------
@@ -382,11 +387,14 @@ saveArchRProject(ArchRProj = arch.proj, outputDirectory = working.dir, load = TR
 
 corGSM_MM <- readRDS(paste0(atacProject, "_corGSM_MM.RDS"))
 
+# Footprinting ------------------------------------------------------------
+
+motifPositions <- getPositions(arch.proj)
+saveRDS(motifPositions, file = paste0(working.dir, atacProject, "-MotifPositions.rds"))
 
 
 
 # Integrate scRNA object (Seurat) -----------------------------------------
-# arch.proj <- NewLoadArchProj(force = TRUE)
 arch.proj@peakAnnotation
 plotEmbedding(ArchRProj = arch.proj, colorBy = "cellColData", name = "SimpDisease", embedding = "UMAP_harmony", plotAs = "points")
 plotEmbedding(ArchRProj = arch.proj, colorBy = "cellColData", name = "Harmony_res0.5", embedding = "UMAP_harmony", plotAs = "points")
@@ -399,10 +407,10 @@ colnames(seurat.object@meta.data)
 # in following code change `seurat.object` to `seurat.subset` for ASHG2023 work
 # seurat.object$integrated_snn_res.0.5 <- paste0("SCT", seurat.subset$integrated_snn_res.0.5)
 cluster.ids <- c(
-  "Exocrine1", #SCT0
+  "Exocrine", #SCT0
   "Mixed1", #SCT1
   "Alpha2", #SCT2
-  "Exocrine2", #SCT3--REG1A
+  "Exocrine", #SCT3--REG1A
   "Beta1", #SCT4
   "Epithelial", #SCT5--KRT18
   "Endothelial", #SCT6
@@ -441,7 +449,7 @@ saveArchRProject(arch.proj, outputDirectory = "/Volumes/Labs/Rotimi/EH/ASHG2023/
 
 color.palette
 
-pal <- paletteDiscrete(values = seurat.subset$cell.ids, set = arch.palette)
+pal <- paletteDiscrete(values = seurat.subset$cell.ids)
 plotEmbedding(arch.proj, embedding = "UMAP_harmony", colorBy = "cellColData", name = "predictedGroup_Un") +
   theme_ArchR(legendTextSize = 12)
 
@@ -451,6 +459,137 @@ cbind(preClust, rownames(cM)) #Assignments
 saveArchRProject(arch.proj, outputDirectory = "archRvsRNApctvar95", load = TRUE)
 
 write.table(getCellColData(arch.proj), file = paste0(atacProject, "_getCellColData_integratedRNA.txt"), quote = FALSE, sep = "\t", row.names = TRUE, col.names = TRUE)
+
+
+
+# Remap clusters ----------------------------------------------------------
+
+# cM <- confusionMatrix(arch.proj$Harmony_res0.5, arch.proj$predictedGroup_Un)
+# labelOld <- rownames(cM)
+# labelNew <- colnames(cM)
+
+remapClust <- c(
+  "C1" = "Beta1",
+  "C2" = "Beta1",
+  "C3" = "Alpha2",
+  "C4" = "Alpha2",
+  "C5" = "Alpha3",
+  "C6" = "Alpha3",
+  "C7" = "Alpha3",
+  "C8" = "NA",
+  "C9" = "Beta2",
+  "C10" = "Beta2",
+  "C11" = "Beta2",
+  "C12" = "Alpha1Alpha4",
+  "C13" = "Epithelial",
+  "C14" = "Epithelial",
+  "C15" = "Epithelial",
+  "C16" = "Epithelial",
+  "C17" = "Exocrine1",
+  "C18" = "Exocrine2",
+  "C19" = "Exocrine1",
+  "C20" = "Immune4",
+  "C21" = "MastMacrophages",
+  "C22" = "Endothelial",
+  "C23" = "Immune3",
+  "C24" = "Immune1",
+  "C25" = "Immune1"
+)
+
+# remapClust <- remapClust[names(remapClust) %in% labelNew]
+# labelNew2 <- mapLabels(labelNew, oldLabels = names(remapClust), newLabels = remapClust)
+arch.proj$pop.id <- mapLabels(arch.proj$Harmony_res0.5, newLabels = remapClust, oldLabels = names(remapClust))
+plotEmbedding(arch.proj, embedding = "UMAP_harmony", colorBy = "cellColData", name = "pop.id")
+
+exocrine.gps <- c("Exocrine1", "Exocrine2")
+exocrine.markers <- getMarkerFeatures(
+  ArchRProj = arch.proj,
+  useMatrix = "PeakMatrix",
+  groupBy = "pop.id",
+  testMethod = "wilcoxon",
+  bias = c("TSSEnrichment", "log10(nFrags)"),
+  useGroups = exocrine.gps,
+  bgdGroups = c("Alpha2", "Beta2", "Alpha1Alpha4", "MastMacrophages", "Epithelial", "Endothelial", "Immune1", "Immune3", "Immune4", "Alpha3", "Beta1")
+)
+saveRDS(exocrine.markers, file = paste0(atacProject, "-ExocrineMarkerPeaks-byType.RDS"))
+exocrine.markers <- readRDS(paste0(atacProject, "-ExocrineMarkerPeaks-byType.RDS"))
+
+# arch.proj <- addMotifAnnotations(arch.proj, motifSet = "encode", annoName = "exocrineencode", force = TRUE)
+# arch.proj <- addArchRAnnotations(ArchRProj = arch.proj, collection = "EncodeTFBS", force = TRUE)
+enrichEncode <- peakAnnoEnrichment(seMarker = exocrine.markers, ArchRProj = arch.proj, peakAnnotation = "encode", cutOff = "FDR <= 0.1 & Log2FC >= 0.5")
+heatmapEncode <- plotEnrichHeatmap(enrichEncode, n = 20, transpose = TRUE)
+tfbshm <-ComplexHeatmap::draw(heatmapEncode, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+
+png(filename = paste0(atacProject, "-ExocrineEnrichedHM.png"), height = 800, width = 1000, bg = "transparent")
+plot(tfbshm)
+dev.off()
+
+
+rna.markers <- getMarkerFeatures(
+  ArchRProj = arch.proj,
+  useMatrix = "PeakMatrix",
+  groupBy = "pop.id",
+  testMethod = "wilcoxon",
+  bias = c("TSSEnrichment", "log10(nFrags)")
+)
+saveRDS(rna.markers, file = paste0(atacProject, "-RNAMarkerPeaks-byType.RDS"))
+rna.markers <- readRDS(paste0(atacProject, "-RNAMarkerPeaks-byType.RDS"))
+
+rnaEncode <- peakAnnoEnrichment(seMarker = rna.markers, ArchRProj = arch.proj, peakAnnotation = "encode", cutOff = "FDR <= 0.1 & Log2FC >= 0.5")
+rnaheatmapEncode <- plotEnrichHeatmap(rnaEncode, n = 5, transpose = TRUE)
+rnahm <-ComplexHeatmap::draw(rnaheatmapEncode, heatmap_legend_side = "bot", annotation_legend_side = "bot", cluster_rows = TRUE, show_row_dend = FALSE)
+plot(rnahm)
+
+png(filename = paste0(atacProject, "-RNAEnrichedHM.png"), height = 800, width = 1000, bg = "transparent")
+plot(rnahm)
+dev.off()
+
+beta.gps <- c("Beta1", "Beta2")
+beta.markers <- getMarkerFeatures(
+  ArchRProj = arch.proj,
+  useMatrix = "PeakMatrix",
+  groupBy = "pop.id",
+  testMethod = "wilcoxon",
+  bias = c("TSSEnrichment", "log10(nFrags)"),
+  useGroups = beta.gps,
+  bgdGroups = unique(arch.proj$pop.id)[unique(arch.proj$pop.id) %ni% beta.gps]
+)
+saveRDS(beta.markers, file = paste0(atacProject, "-BetaMarkerPeaks-byType.RDS"))
+beta.markers <- readRDS(paste0(atacProject, "-BetaMarkerPeaks-byType.RDS"))
+
+betaEncode <- peakAnnoEnrichment(seMarker = beta.markers, ArchRProj = arch.proj, peakAnnotation = "encode", cutOff = "FDR <= 0.1 & Log2FC >= 0.5")
+betaheatmapEncode <- plotEnrichHeatmap(betaEncode, n = 20, transpose = TRUE)
+betahm <-ComplexHeatmap::draw(betaheatmapEncode, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+
+png(filename = paste0(atacProject, "-BetaEnrichedHM.png"), height = 800, width = 1000, bg = "transparent")
+plot(betahm)
+dev.off()
+
+exocrinebeta.gps <- c("Beta1", "Beta2", "Exocrine1", "Exocrine2")
+exocrinebeta.markers <- getMarkerFeatures(
+  ArchRProj = arch.proj,
+  useMatrix = "PeakMatrix",
+  groupBy = "pop.id",
+  testMethod = "wilcoxon",
+  bias = c("TSSEnrichment", "log10(nFrags)"),
+  useGroups = exocrinebeta.gps,
+  bgdGroups = unique(arch.proj$pop.id)[unique(arch.proj$pop.id) %ni% exocrinebeta.gps]
+)
+saveRDS(exocrinebeta.markers, file = paste0(atacProject, "-ExocrineBetaMarkerPeaks-byType.RDS"))
+exocrinebeta.markers <- readRDS(paste0(atacProject, "-ExocrineBetaMarkerPeaks-byType.RDS"))
+
+exocrinebetaEncode <- peakAnnoEnrichment(seMarker = exocrinebeta.markers, ArchRProj = arch.proj, peakAnnotation = "encode", cutOff = "FDR <= 0.1 & Log2FC >= 0.5")
+exocrinebetaheatmapEncode <- plotEnrichHeatmap(exocrinebetaEncode, n = 10, transpose = TRUE)
+exocrinebetahm <-ComplexHeatmap::draw(exocrinebetaheatmapEncode, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+
+png(filename = paste0(atacProject, "-ExcrineBetaEnrichedHM_n10.png"), height = 800, width = 1000, bg = "transparent")
+plot(exocrinebetahm)
+dev.off()
+
+exocrinebeta.markers@metadata
+
+
+
 
 
 # Trajectory --------------------------------------------------------------
