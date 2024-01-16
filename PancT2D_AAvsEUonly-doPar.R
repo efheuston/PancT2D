@@ -1024,7 +1024,7 @@ names(mycolors) <- c("DOWN", "UP", "NO")
 
 
 p <- ggplot(data=enrich.plot, aes(x=normalizedEnrichmentScore, y=-log10(FDR), col=diffexpressed, label=delabel)) +
-  theme_minimal(axis.text.x = element_text(csize = 20)) +
+  theme_minimal() +
   # geom_text_repel(max.overlaps = 30) +
   scale_color_manual(values=mycolors) +
   ylim(c(0, max(-log10(enrich.plot$FDR)+1))) +
@@ -1034,7 +1034,8 @@ p <- ggplot(data=enrich.plot, aes(x=normalizedEnrichmentScore, y=-log10(FDR), co
   geom_hline(yintercept=c(0), col="black", linetype = 1, size = 1.1) +
   geom_hline(yintercept=-log10(0.05), col="gray", linetype = "dashed", size = 1.1)+
   geom_point(aes(size = size, alpha = 0.5)) + 
-  scale_size(range = c(1, 10))
+  scale_size(range = c(1, 10)) + 
+  theme(axis.text = element_text(size = 20, face = "bold"), axis.title = element_blank(), legend.position = "none")
 plot(p)
 
 png(filename = "beta1vbeta2_volcano_all.png", height = 600, width = 1200, bg = "transparent")
